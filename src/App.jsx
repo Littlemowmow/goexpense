@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Cell, ReferenceLine,
   PieChart, Pie, Tooltip,
@@ -6,28 +6,29 @@ import {
 import {
   Wallet, CalendarClock, Users, Plus, Trash2, Check, Settings,
   ChevronLeft, ChevronRight, AlertTriangle, ArrowDownRight, ArrowUpRight, X,
-  Repeat, Download, Search, TrendingUp, Sparkles,
+  Repeat, Download, Search, TrendingUp, Sparkles, LogOut,
 } from "lucide-react";
 import { exportPDF } from "./report";
+import { supabase, supabaseConfigured } from "./supabase";
+import { fetchAll, db } from "./db";
 
 /* ---------- theme: coastal mist (calm, light) ---------- */
 const T = {
   bg: "#EEF3F4", panel: "#FBFDFD", panel2: "#FFFFFF", line: "#DEE7E8",
   ink: "#38454A", sub: "#7A8990", faint: "#A9B6BA",
-  // muted accents (kept under the original key names so logic is untouched)
   blue: "#7FA6A3",   // soft teal — primary
   green: "#9DB89A",  // sage — positive
   amber: "#CBA36A",  // muted gold — due soon
   rose: "#C28B7E",   // dusty clay — alerts / negative
   violet: "#A99BC0", // dusty lavender — IOUs
-  track: "#E4ECED",  // progress bar groove
-  barIdle: "#CBDADC",// inactive bar fill
+  track: "#E4ECED",
+  barIdle: "#CBDADC",
 };
 const SERIF = "'Iowan Old Style', 'Palatino Linotype', Palatino, Palladio, Georgia, 'Times New Roman', serif";
 const CAT_COLORS = ["#7FA6A3", "#93B0C4", "#9DB89A", "#C9A27E", "#A99BC0", "#84B0AE", "#D2BFA0", "#A8BD9E"];
+const BG = `radial-gradient(1100px 460px at 50% -240px, #FFFFFF, ${T.bg} 70%)`;
 
 const DEFAULTS = {
-  expenses: [],
   budgets: {
     weekly: 260,
     categories: [
@@ -39,9 +40,6 @@ const DEFAULTS = {
       { name: "Other", limit: 35 },
     ],
   },
-  payments: [],
-  debts: [],
-  recurring: [], // recurring-expense templates: {id, amount, category, note, cadence, lastDate}
 };
 
 /* ---------- date helpers (local, no TZ drift) ---------- */
@@ -55,7 +53,7 @@ const money = (n) => (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(undefined
 const today0 = () => { const x = new Date(); x.setHours(0, 0, 0, 0); return x; };
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/* ---------- recurring: materialise any periods that have come due ---------- */
+/* ---------- recurring: materialise periods that have come due ---------- */
 function materializeRecurring(templates) {
   const tnow = today0();
   const additions = [];
@@ -64,7 +62,7 @@ function materializeRecurring(templates) {
     let next = nextPeriod(last, t.cadence);
     let guard = 0;
     while (next <= tnow && guard < 520) {
-      additions.push({ id: crypto.randomUUID(), amount: t.amount, category: t.category, note: t.note, date: fmt(next), recurringId: t.id });
+      additions.push({ amount: t.amount, category: t.category, note: t.note, date: fmt(next), recurringId: t.id });
       last = next; next = nextPeriod(last, t.cadence); guard++;
     }
     return { ...t, lastDate: fmt(last) };
@@ -77,53 +75,28 @@ function buildSample() {
   const today = today0();
   const ws = weekStart(today);
   const elapsed = Math.round((today - ws) / 86400000); // 0..6
-  const uid = () => crypto.randomUUID();
   const exp = [];
   const tw = [["Food", 18.5, "lunch"], ["Groceries", 64, "weekly shop"], ["Transport", 12, "metro"], ["Fun", 28, "cinema"], ["Subscriptions", 11.99, "spotify"], ["Food", 9.5, "coffee"], ["Food", 22, "dinner"]];
-  tw.forEach((r, i) => exp.push({ id: uid(), amount: r[1], category: r[0], note: r[2], date: fmt(addDays(ws, Math.min(i, elapsed))) }));
+  tw.forEach((r, i) => exp.push({ amount: r[1], category: r[0], note: r[2], date: fmt(addDays(ws, Math.min(i, elapsed))) }));
   const cats = ["Food", "Groceries", "Transport", "Fun", "Subscriptions", "Other"];
   for (let wk = 1; wk <= 7; wk++) {
     const base = addDays(ws, -7 * wk);
     const n = 3 + ((wk * 7) % 4);
-    for (let i = 0; i < n; i++) exp.push({ id: uid(), amount: 15 + ((wk * 13 + i * 7) % 70), category: cats[(wk + i) % 6], note: "", date: fmt(addDays(base, i % 6)) });
+    for (let i = 0; i < n; i++) exp.push({ amount: 15 + ((wk * 13 + i * 7) % 70), category: cats[(wk + i) % 6], note: "", date: fmt(addDays(base, i % 6)) });
   }
   return {
     expenses: exp,
     payments: [
-      { id: uid(), name: "Rent", amount: 1200, dueDate: fmt(addDays(today, 3)), recurring: "monthly", status: "unpaid" },
-      { id: uid(), name: "Electricity", amount: 64.2, dueDate: fmt(addDays(today, -2)), recurring: "monthly", status: "unpaid" },
-      { id: uid(), name: "Netflix", amount: 15.99, dueDate: fmt(addDays(today, 12)), recurring: "monthly", status: "paid" },
+      { name: "Rent", amount: 1200, dueDate: fmt(addDays(today, 3)), recurring: "monthly", status: "unpaid" },
+      { name: "Electricity", amount: 64.2, dueDate: fmt(addDays(today, -2)), recurring: "monthly", status: "unpaid" },
+      { name: "Netflix", amount: 15.99, dueDate: fmt(addDays(today, 12)), recurring: "monthly", status: "paid" },
     ],
     debts: [
-      { id: uid(), person: "Sara", amount: 40, note: "concert ticket", direction: "owed" },
-      { id: uid(), person: "Mike", amount: 25, note: "dinner", direction: "owe" },
+      { person: "Sara", amount: 40, note: "concert ticket", direction: "owed" },
+      { person: "Mike", amount: 25, note: "dinner", direction: "owe" },
     ],
-    recurring: [{ id: uid(), amount: 11.99, category: "Subscriptions", note: "Spotify", cadence: "monthly", lastDate: fmt(today) }],
+    recurring: [{ amount: 11.99, category: "Subscriptions", note: "Spotify", cadence: "monthly", lastDate: fmt(today) }],
   };
-}
-
-/* ---------- storage (localStorage-backed; mirrors the {value} shape) ---------- */
-const STORE_PREFIX = "life-dashboard:";
-const storage = {
-  async get(key) {
-    const raw = localStorage.getItem(STORE_PREFIX + key);
-    return raw == null ? null : { value: raw };
-  },
-  async set(key, value) {
-    localStorage.setItem(STORE_PREFIX + key, value);
-  },
-};
-
-const KEYS = ["expenses", "budgets", "payments", "debts", "recurring"];
-async function loadAll() {
-  const out = JSON.parse(JSON.stringify(DEFAULTS));
-  for (const k of KEYS) {
-    try { const r = await storage.get(k); if (r && r.value) out[k] = JSON.parse(r.value); } catch { /* missing key */ }
-  }
-  return out;
-}
-async function save(key, value) {
-  try { await storage.set(key, JSON.stringify(value)); } catch (e) { console.error("save failed", key, e); }
 }
 
 /* ---------- small ui ---------- */
@@ -134,6 +107,7 @@ const Field = ({ children }) => <div className="flex flex-col gap-1">{children}<
 const inputStyle = { background: "#FFFFFF", border: `1px solid ${T.line}`, color: T.ink, borderRadius: 12, padding: "10px 12px", fontSize: 14, outline: "none", width: "100%" };
 const btn = (bg, fg = "#FFFFFF") => ({ background: bg, color: fg, border: "none", borderRadius: 12, padding: "10px 16px", fontSize: 14, fontWeight: 600, letterSpacing: .2, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, boxShadow: "0 1px 2px rgba(56,69,74,.10)" });
 const ghost = { background: "transparent", color: T.sub, border: `1px solid ${T.line}`, borderRadius: 12, padding: "9px 12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 };
+const Wordmark = ({ size = 12.5 }) => <div style={{ fontSize: size, fontWeight: 800, letterSpacing: 0.6, color: T.blue }}>GO<span style={{ color: T.ink }}>expense</span></div>;
 
 function Progress({ value, max, color }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
@@ -176,9 +150,76 @@ function Segmented({ options, value, onChange }) {
   );
 }
 
+const GlobalStyle = () => <style>{`*{box-sizing:border-box} input::placeholder{color:${T.faint}} .num{font-feature-settings:"tnum";font-variant-numeric:tabular-nums} .serif{font-family:${SERIF}} .card{transition:transform .18s ease, border-color .18s ease} .card:hover{transform:translateY(-2px); border-color:#CCD9DA} .ico-btn:hover{color:${T.ink}!important}`}</style>;
+
+function Splash({ text = "settling in…" }) {
+  return <div style={{ background: BG, color: T.sub, minHeight: "100vh", display: "grid", placeItems: "center", fontFamily: SERIF, fontStyle: "italic", fontSize: 16, padding: 20, textAlign: "center" }}>{text}</div>;
+}
+
+/* ---------- auth ---------- */
+function LoginScreen() {
+  const [mode, setMode] = useState("signin");
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErr(""); setMsg("");
+    if (!email.trim() || pw.length < 6) { setErr("Enter an email and a password of at least 6 characters."); return; }
+    setBusy(true);
+    try {
+      if (mode === "signup") {
+        const { data, error } = await supabase.auth.signUp({ email: email.trim(), password: pw });
+        if (error) throw error;
+        if (!data.session) setMsg("Account created. Check your email to confirm, then sign in.");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
+        if (error) throw error;
+      }
+    } catch (e2) {
+      setErr(e2.message || String(e2));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const swap = () => { setMode((m) => (m === "signup" ? "signin" : "signup")); setErr(""); setMsg(""); };
+
+  return (
+    <div style={{ background: BG, minHeight: "100vh", display: "grid", placeItems: "center", padding: 20, fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
+      <GlobalStyle />
+      <Card className="p-6" style={{ width: "min(400px, 100%)" }}>
+        <div style={{ textAlign: "center", marginBottom: 20 }}>
+          <div style={{ display: "inline-flex" }}><Wordmark size={18} /></div>
+          <div className="serif" style={{ fontStyle: "italic", color: T.sub, fontSize: 15, marginTop: 4 }}>{mode === "signup" ? "create your account" : "welcome back"}</div>
+        </div>
+        <form onSubmit={submit} className="flex flex-col gap-2">
+          <input style={inputStyle} type="email" autoComplete="email" placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input style={inputStyle} type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="password" value={pw} onChange={(e) => setPw(e.target.value)} />
+          {err && <div style={{ fontSize: 12.5, color: T.rose, background: T.rose + "1A", borderRadius: 10, padding: "8px 11px" }}>{err}</div>}
+          {msg && <div style={{ fontSize: 12.5, color: T.green, background: T.green + "1A", borderRadius: 10, padding: "8px 11px" }}>{msg}</div>}
+          <button type="submit" disabled={busy} style={{ ...btn(T.blue), justifyContent: "center", marginTop: 4, opacity: busy ? 0.6 : 1 }}>{busy ? "…" : mode === "signup" ? "sign up" : "sign in"}</button>
+        </form>
+        <div style={{ textAlign: "center", marginTop: 14 }}>
+          <button onClick={swap} style={{ background: "transparent", border: "none", color: T.blue, cursor: "pointer", fontSize: 13 }}>
+            {mode === "signup" ? "have an account? sign in" : "new here? create an account"}
+          </button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 /* ---------- main ---------- */
-export default function LifeDashboard() {
+export default function GOexpense() {
+  const [session, setSession] = useState(null);
+  const [authReady, setAuthReady] = useState(!supabaseConfigured);
   const [loading, setLoading] = useState(true);
+  const [dataError, setDataError] = useState("");
+
   const [expenses, setExpenses] = useState([]);
   const [budgets, setBudgets] = useState(DEFAULTS.budgets);
   const [payments, setPayments] = useState([]);
@@ -190,19 +231,45 @@ export default function LifeDashboard() {
   const [filterCat, setFilterCat] = useState("");
   const [trendMode, setTrendMode] = useState("weeks");
 
+  /* auth: current session + subscribe to changes */
   useEffect(() => {
-    loadAll().then((d) => {
-      // roll any recurring expenses that have come due since last open
-      const { additions, updated } = materializeRecurring(d.recurring || []);
-      const allExp = additions.length ? [...additions, ...d.expenses] : d.expenses;
-      setExpenses(allExp);
-      setBudgets(d.budgets); setPayments(d.payments); setDebts(d.debts); setRecurring(updated);
-      if (additions.length) { save("expenses", allExp); save("recurring", updated); }
-      setLoading(false);
-    });
+    if (!supabaseConfigured) return;
+    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, s) => setSession(s));
+    return () => sub.subscription.unsubscribe();
   }, []);
 
-  const mutate = useCallback((key, setter, next) => { setter(next); save(key, next); }, []);
+  const userId = session?.user?.id;
+
+  /* load this account's data whenever the user changes */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!userId) { setLoading(false); return; }
+      setLoading(true); setDataError("");
+      try {
+        let d = await fetchAll();
+        let nextBudgets = d.budgets;
+        if (!nextBudgets) { nextBudgets = DEFAULTS.budgets; await db.upsertBudget(nextBudgets, userId); }
+        if (d.recurring.length) {
+          const { additions, updated } = materializeRecurring(d.recurring);
+          if (additions.length) {
+            await db.addExpensesBatch(additions);
+            await Promise.all(updated.filter((u, i) => u.lastDate !== d.recurring[i].lastDate).map((u) => db.updateRecurringLastDate(u.id, u.lastDate)));
+            d = await fetchAll();
+            nextBudgets = d.budgets || nextBudgets;
+          }
+        }
+        if (cancelled) return;
+        setExpenses(d.expenses); setPayments(d.payments); setDebts(d.debts); setRecurring(d.recurring); setBudgets(nextBudgets);
+      } catch (err) {
+        if (!cancelled) setDataError(err.message || String(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
 
   /* derived: current week */
   const wkStart = weekRef;
@@ -286,69 +353,111 @@ export default function LifeDashboard() {
       (!q || `${e.note || ""} ${e.category}`.toLowerCase().includes(q)));
   }, [wkExpenses, query, filterCat]);
 
-  /* add an expense, optionally setting up a recurring template */
-  const addExpense = (e, cadence) => {
-    let item = e;
-    if (cadence && cadence !== "once") {
-      const tmpl = { id: crypto.randomUUID(), amount: e.amount, category: e.category, note: e.note, cadence, lastDate: e.date };
-      mutate("recurring", setRecurring, [...recurring, tmpl]);
-      item = { ...e, recurringId: tmpl.id };
-    }
-    mutate("expenses", setExpenses, [item, ...expenses]);
-  };
-  const repeatExpense = (e) => mutate("expenses", setExpenses, [{ ...e, id: crypto.randomUUID(), date: fmt(new Date()), recurringId: undefined }, ...expenses]);
-
-  /* mark a payment paid — recurring bills roll forward to the next cycle */
-  const togglePaid = (p) => {
-    if (p.status === "unpaid" && p.recurring && p.recurring !== "once") {
-      mutate("payments", setPayments, payments.map((x) => x.id === p.id ? { ...x, dueDate: fmt(nextPeriod(parse(x.dueDate), x.recurring === "weekly" ? "weekly" : "monthly")) } : x));
-    } else {
-      mutate("payments", setPayments, payments.map((x) => x.id === p.id ? { ...x, status: x.status === "paid" ? "unpaid" : "paid" } : x));
-    }
-  };
-
-  /* sample data + reset (so an empty dashboard can demo itself) */
   const isEmpty = expenses.length === 0 && payments.length === 0 && debts.length === 0;
-  const loadSample = () => {
-    const s = buildSample();
-    mutate("expenses", setExpenses, s.expenses);
-    mutate("payments", setPayments, s.payments);
-    mutate("debts", setDebts, s.debts);
-    mutate("recurring", setRecurring, s.recurring);
+
+  /* ---------- mutations (optimistic local state + Supabase write) ---------- */
+  const fail = (action) => (err) => { console.error(action, err); setDataError(`Couldn't ${action}: ${err.message || err}`); };
+
+  const addExpense = async (e, cadence) => {
+    try {
+      let recurringId;
+      if (cadence && cadence !== "once") {
+        const t = await db.addRecurring({ amount: e.amount, category: e.category, note: e.note, cadence, lastDate: e.date });
+        setRecurring((r) => [...r, t]); recurringId = t.id;
+      }
+      const row = await db.addExpense({ ...e, recurringId });
+      setExpenses((x) => [row, ...x]);
+    } catch (err) { fail("save expense")(err); }
   };
-  const clearAll = () => {
-    mutate("expenses", setExpenses, []);
-    mutate("payments", setPayments, []);
-    mutate("debts", setDebts, []);
-    mutate("recurring", setRecurring, []);
+  const repeatExpense = async (e) => {
+    try { const row = await db.addExpense({ amount: e.amount, category: e.category, note: e.note, date: fmt(new Date()) }); setExpenses((x) => [row, ...x]); }
+    catch (err) { fail("repeat expense")(err); }
+  };
+  const removeExpense = async (id) => {
+    const prev = expenses; setExpenses((x) => x.filter((e) => e.id !== id));
+    try { await db.delExpense(id); } catch (err) { setExpenses(prev); fail("delete expense")(err); }
+  };
+  const addPayment = async (p) => { try { const row = await db.addPayment(p); setPayments((x) => [...x, row]); } catch (err) { fail("add payment")(err); } };
+  const removePayment = async (id) => {
+    const prev = payments; setPayments((x) => x.filter((p) => p.id !== id));
+    try { await db.delPayment(id); } catch (err) { setPayments(prev); fail("delete payment")(err); }
+  };
+  const togglePaid = async (p) => {
+    const prev = payments;
+    try {
+      if (p.status === "unpaid" && p.recurring && p.recurring !== "once") {
+        const nd = fmt(nextPeriod(parse(p.dueDate), p.recurring === "weekly" ? "weekly" : "monthly"));
+        setPayments((x) => x.map((y) => y.id === p.id ? { ...y, dueDate: nd } : y));
+        await db.updatePayment(p.id, { due_date: nd });
+      } else {
+        const ns = p.status === "paid" ? "unpaid" : "paid";
+        setPayments((x) => x.map((y) => y.id === p.id ? { ...y, status: ns } : y));
+        await db.updatePayment(p.id, { status: ns });
+      }
+    } catch (err) { setPayments(prev); fail("update payment")(err); }
+  };
+  const addDebt = async (d) => { try { const row = await db.addDebt(d); setDebts((x) => [...x, row]); } catch (err) { fail("add IOU")(err); } };
+  const removeDebt = async (id) => {
+    const prev = debts; setDebts((x) => x.filter((d) => d.id !== id));
+    try { await db.delDebt(id); } catch (err) { setDebts(prev); fail("delete IOU")(err); }
+  };
+  const removeRecurring = async (id) => {
+    const prev = recurring; setRecurring((r) => r.filter((x) => x.id !== id));
+    try { await db.delRecurring(id); } catch (err) { setRecurring(prev); fail("delete recurring")(err); }
+  };
+  const saveBudget = async (b) => { const prev = budgets; setBudgets(b); setShowSettings(false); try { await db.upsertBudget(b, userId); } catch (err) { setBudgets(prev); fail("save budget")(err); } };
+  const loadSample = async () => {
+    try { await db.seedSample(buildSample()); const d = await fetchAll(); setExpenses(d.expenses); setPayments(d.payments); setDebts(d.debts); setRecurring(d.recurring); if (d.budgets) setBudgets(d.budgets); }
+    catch (err) { fail("load sample data")(err); }
+  };
+  const clearAll = async () => {
+    const snap = { expenses, payments, debts, recurring };
+    setExpenses([]); setPayments([]); setDebts([]); setRecurring([]);
+    try { await db.clearAll(); } catch (err) { setExpenses(snap.expenses); setPayments(snap.payments); setDebts(snap.debts); setRecurring(snap.recurring); fail("clear data")(err); }
+  };
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setExpenses([]); setPayments([]); setDebts([]); setRecurring([]); setBudgets(DEFAULTS.budgets); setShowSettings(false);
   };
 
-  /* a quiet, time-of-day greeting */
+  /* greeting */
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "good morning" : hour < 18 ? "good afternoon" : "good evening";
 
-  if (loading) return <div style={{ background: T.bg, color: T.sub, minHeight: 480, display: "grid", placeItems: "center", fontFamily: SERIF, fontStyle: "italic", fontSize: 16 }}>settling in…</div>;
+  /* ---------- gates ---------- */
+  if (!supabaseConfigured) return <Splash text="Supabase isn't configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env, then restart." />;
+  if (!authReady) return <Splash />;
+  if (!session) return <LoginScreen />;
+  if (loading) return <Splash text="loading your data…" />;
 
   return (
-    <div style={{ background: `radial-gradient(1100px 460px at 50% -240px, #FFFFFF, ${T.bg} 70%)`, color: T.ink, minHeight: "100vh", fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif", padding: "28px clamp(16px,4vw,40px)" }}>
-      <style>{`*{box-sizing:border-box} input::placeholder{color:${T.faint}} .num{font-feature-settings:"tnum";font-variant-numeric:tabular-nums} .serif{font-family:${SERIF}} .card{transition:transform .18s ease, border-color .18s ease} .card:hover{transform:translateY(-2px); border-color:#CCD9DA} .ico-btn:hover{color:${T.ink}!important}`}</style>
+    <div style={{ background: BG, color: T.ink, minHeight: "100vh", fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif", padding: "28px clamp(16px,4vw,40px)" }}>
+      <GlobalStyle />
 
       {/* header */}
       <div className="flex items-center justify-between flex-wrap gap-3" style={{ marginBottom: 26, maxWidth: 1180, marginInline: "auto", width: "100%" }}>
         <div>
-          <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: 0.6, color: T.blue, marginBottom: 1 }}>GO<span style={{ color: T.ink }}>expense</span></div>
+          <Wordmark />
           <div className="serif" style={{ fontSize: 15, color: T.sub, fontStyle: "italic" }}>{greeting}</div>
           <h1 className="serif" style={{ fontSize: 36, fontWeight: 500, margin: "1px 0 0", letterSpacing: -0.4, color: T.ink }}>your week</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap" style={{ justifyContent: "flex-end" }}>
           <span className="serif" style={{ color: T.sub, fontSize: 14, fontStyle: "italic" }}>{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</span>
           <button style={ghost} onClick={() => exportPDF(expenses, budgets)} title="export a week-by-week PDF report"><Download size={15} /> export pdf</button>
           <button style={ghost} onClick={() => setShowSettings(true)}><Settings size={15} /> budget</button>
+          <button style={ghost} onClick={signOut} title={session.user.email}><LogOut size={15} /> sign out</button>
         </div>
       </div>
 
       <div style={{ maxWidth: 1180, marginInline: "auto" }}>
-      {/* first-run nudge: let an empty dashboard demo itself */}
+      {dataError && (
+        <Card className="p-4" style={{ marginBottom: 16, borderColor: T.rose + "66", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ color: T.rose, fontSize: 13.5 }}><AlertTriangle size={14} style={{ verticalAlign: "-2px", marginRight: 6 }} />{dataError}</span>
+          <button style={ghost} onClick={() => setDataError("")}>dismiss</button>
+        </Card>
+      )}
+
+      {/* first-run nudge */}
       {isEmpty && (
         <Card className="p-4" style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div className="serif" style={{ color: T.sub, fontStyle: "italic", fontSize: 14.5 }}>nothing logged yet — want to see it filled in with a few weeks of sample data?</div>
@@ -381,7 +490,6 @@ export default function LifeDashboard() {
             <span className="num" style={{ fontSize: 12.5, fontWeight: 600, color: paceColor, background: paceColor + "22", borderRadius: 99, padding: "5px 12px" }}>{paceLabel}</span>
           </div>
 
-          {/* big burn bar */}
           <div className="flex items-baseline gap-2" style={{ marginBottom: 8 }}>
             <span className="num" style={{ fontSize: 32, fontWeight: 600, color: T.ink }}>{money(spent)}</span>
             <span style={{ color: T.sub, fontSize: 14 }}>/ {money(budgets.weekly)}</span>
@@ -389,7 +497,6 @@ export default function LifeDashboard() {
           <Progress value={spent} max={budgets.weekly} color={T.blue} />
 
           <div className="grid gap-6" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 22 }}>
-            {/* by day */}
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 12.5, color: T.sub, marginBottom: 10, fontWeight: 500 }}>by day</div>
               <Chart height={150}>{(w) => (
@@ -403,7 +510,6 @@ export default function LifeDashboard() {
                 </BarChart>
               )}</Chart>
             </div>
-            {/* by category donut */}
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 12.5, color: T.sub, marginBottom: 10, fontWeight: 500 }}>by category</div>
               <div style={{ height: 150, position: "relative" }}>
@@ -429,7 +535,6 @@ export default function LifeDashboard() {
             </div>
           </div>
 
-          {/* per-category progress */}
           <div className="grid gap-x-6 gap-y-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", marginTop: 20 }}>
             {byCat.map((c, i) => (
               <div key={i}>
@@ -471,7 +576,6 @@ export default function LifeDashboard() {
           <SectionTitle icon={<Wallet size={16} />} title="expenses" />
           <ExpenseAdder categories={budgets.categories} onAdd={addExpense} />
 
-          {/* search + filter */}
           <div className="flex gap-2" style={{ marginTop: 12 }}>
             <div style={{ position: "relative", flex: 1 }}>
               <Search size={14} color={T.faint} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)" }} />
@@ -487,7 +591,7 @@ export default function LifeDashboard() {
             {wkExpenses.length === 0 && <Empty text="nothing logged this week yet" />}
             {wkExpenses.length > 0 && shownExpenses.length === 0 && <Empty text="no matches" />}
             {shownExpenses.map((e) => (
-              <Row key={e.id} onDelete={() => mutate("expenses", setExpenses, expenses.filter((x) => x.id !== e.id))} onRepeat={() => repeatExpense(e)}>
+              <Row key={e.id} onDelete={() => removeExpense(e.id)} onRepeat={() => repeatExpense(e)}>
                 <div style={{ minWidth: 0 }}>
                   <div className="flex items-center gap-2" style={{ fontSize: 14 }}>
                     <span style={{ width: 7, height: 7, borderRadius: 9, background: CAT_COLORS[budgets.categories.findIndex((c) => c.name === e.category) % CAT_COLORS.length] || T.sub, flexShrink: 0 }} />
@@ -505,14 +609,14 @@ export default function LifeDashboard() {
         {/* ---- payments due ---- */}
         <Card className="p-5">
           <SectionTitle icon={<CalendarClock size={16} />} title="payments due" />
-          <PaymentAdder onAdd={(p) => mutate("payments", setPayments, [...payments, p])} />
+          <PaymentAdder onAdd={addPayment} />
           <div style={{ marginTop: 14, maxHeight: 300, overflowY: "auto" }}>
             {payments.length === 0 && <Empty text="add rent, subscriptions, or one-off bills" />}
             {sortedPayments.map((p) => {
               const od = p.status === "unpaid" && parse(p.dueDate) < today0();
               const soon = p.status === "unpaid" && !od && parse(p.dueDate) <= addDays(today0(), 7);
               return (
-                <Row key={p.id} onDelete={() => mutate("payments", setPayments, payments.filter((x) => x.id !== p.id))}>
+                <Row key={p.id} onDelete={() => removePayment(p.id)}>
                   <div style={{ minWidth: 0, opacity: p.status === "paid" ? 0.45 : 1 }}>
                     <div className="flex items-center gap-2" style={{ fontSize: 14, fontWeight: 600 }}>
                       {od && <AlertTriangle size={13} color={T.rose} />}
@@ -543,11 +647,11 @@ export default function LifeDashboard() {
             <Mini label="owed to you" value={money(owedToMe)} tint={T.green} />
             <Mini label="net" value={money(owedToMe - iOwe)} tint={owedToMe - iOwe >= 0 ? T.green : T.rose} />
           </div>
-          <DebtAdder onAdd={(d) => mutate("debts", setDebts, [...debts, d])} />
+          <DebtAdder onAdd={addDebt} />
           <div style={{ marginTop: 14, maxHeight: 280, overflowY: "auto" }}>
             {debts.length === 0 && <Empty text="track who you owe and who owes you" />}
             {debts.map((d) => (
-              <Row key={d.id} onDelete={() => mutate("debts", setDebts, debts.filter((x) => x.id !== d.id))}>
+              <Row key={d.id} onDelete={() => removeDebt(d.id)}>
                 <div style={{ minWidth: 0 }}>
                   <div className="flex items-center gap-2" style={{ fontSize: 14, fontWeight: 600 }}>
                     {d.direction === "owe" ? <ArrowUpRight size={14} color={T.rose} /> : <ArrowDownRight size={14} color={T.green} />}
@@ -564,9 +668,9 @@ export default function LifeDashboard() {
       </div>
 
       {showSettings && <BudgetSettings budgets={budgets} recurring={recurring}
-        onDeleteRecurring={(id) => mutate("recurring", setRecurring, recurring.filter((r) => r.id !== id))}
+        onDeleteRecurring={removeRecurring}
         onClearAll={() => { clearAll(); setShowSettings(false); }}
-        onSave={(b) => { mutate("budgets", setBudgets, b); setShowSettings(false); }} onClose={() => setShowSettings(false)} />}
+        onSave={saveBudget} onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
@@ -612,7 +716,7 @@ function ExpenseAdder({ categories, onAdd }) {
   const add = () => {
     const a = parseFloat(amount);
     if (!a || a <= 0) return;
-    onAdd({ id: crypto.randomUUID(), amount: a, category, note: note.trim(), date }, cadence);
+    onAdd({ amount: a, category, note: note.trim(), date }, cadence);
     setAmount(""); setNote(""); setCadence("once");
   };
   return (
@@ -640,7 +744,7 @@ function PaymentAdder({ onAdd }) {
   const add = () => {
     const a = parseFloat(amount);
     if (!name.trim() || !a || a <= 0) return;
-    onAdd({ id: crypto.randomUUID(), name: name.trim(), amount: a, dueDate, recurring, status: "unpaid" });
+    onAdd({ name: name.trim(), amount: a, dueDate, recurring, status: "unpaid" });
     setName(""); setAmount("");
   };
   return (
@@ -666,7 +770,7 @@ function DebtAdder({ onAdd }) {
   const add = () => {
     const a = parseFloat(amount);
     if (!person.trim() || !a || a <= 0) return;
-    onAdd({ id: crypto.randomUUID(), person: person.trim(), amount: a, note: note.trim(), direction });
+    onAdd({ person: person.trim(), amount: a, note: note.trim(), direction });
     setPerson(""); setAmount(""); setNote("");
   };
   return (
