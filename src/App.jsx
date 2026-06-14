@@ -8,6 +8,7 @@ import {
   ChevronLeft, ChevronRight, AlertTriangle, ArrowDownRight, ArrowUpRight, X,
   Repeat, Download, Search, TrendingUp, Sparkles,
 } from "lucide-react";
+import { exportPDF } from "./report";
 
 /* ---------- theme: coastal mist (calm, light) ---------- */
 const T = {
@@ -99,20 +100,6 @@ function buildSample() {
     ],
     recurring: [{ id: uid(), amount: 11.99, category: "Subscriptions", note: "Spotify", cadence: "monthly", lastDate: fmt(today) }],
   };
-}
-
-/* ---------- csv export ---------- */
-function exportCSV(expenses) {
-  const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const sorted = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
-  const rows = [["date", "category", "note", "amount"], ...sorted.map((e) => [e.date, e.category, e.note || "", e.amount])];
-  const csv = rows.map((r) => r.map(esc).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = `life-ops-expenses-${fmt(new Date())}.csv`;
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
 }
 
 /* ---------- storage (localStorage-backed; mirrors the {value} shape) ---------- */
@@ -349,12 +336,13 @@ export default function LifeDashboard() {
       {/* header */}
       <div className="flex items-center justify-between flex-wrap gap-3" style={{ marginBottom: 26, maxWidth: 1180, marginInline: "auto", width: "100%" }}>
         <div>
+          <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: 0.6, color: T.blue, marginBottom: 1 }}>GO<span style={{ color: T.ink }}>expense</span></div>
           <div className="serif" style={{ fontSize: 15, color: T.sub, fontStyle: "italic" }}>{greeting}</div>
           <h1 className="serif" style={{ fontSize: 36, fontWeight: 500, margin: "1px 0 0", letterSpacing: -0.4, color: T.ink }}>your week</h1>
         </div>
         <div className="flex items-center gap-3">
           <span className="serif" style={{ color: T.sub, fontSize: 14, fontStyle: "italic" }}>{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</span>
-          <button style={ghost} onClick={() => exportCSV(expenses)} title="export all expenses to CSV"><Download size={15} /> export</button>
+          <button style={ghost} onClick={() => exportPDF(expenses, budgets)} title="export a week-by-week PDF report"><Download size={15} /> export pdf</button>
           <button style={ghost} onClick={() => setShowSettings(true)}><Settings size={15} /> budget</button>
         </div>
       </div>
