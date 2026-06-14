@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
-  BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell,
+  BarChart, Bar, XAxis, YAxis, Cell, ReferenceLine,
   PieChart, Pie, Tooltip,
 } from "recharts";
 import {
   Wallet, CalendarClock, Users, Plus, Trash2, Check, Settings,
   ChevronLeft, ChevronRight, AlertTriangle, ArrowDownRight, ArrowUpRight, X,
+  Repeat, Download, Search, TrendingUp,
 } from "lucide-react";
 
 /* ---------- theme: coastal mist (calm, light) ---------- */
@@ -39,6 +40,7 @@ const DEFAULTS = {
   },
   payments: [],
   debts: [],
+  recurring: [], // recurring-expense templates: {id, amount, category, note, cadence, lastDate}
 };
 
 /* ---------- date helpers (local, no TZ drift) ---------- */
@@ -46,10 +48,42 @@ const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0
 const parse = (s) => { const [y, m, dd] = s.split("-").map(Number); return new Date(y, m - 1, dd); };
 const weekStart = (d) => { const x = new Date(d); const k = (x.getDay() + 6) % 7; x.setDate(x.getDate() - k); x.setHours(0, 0, 0, 0); return x; };
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const nextPeriod = (d, cadence) => cadence === "weekly" ? addDays(d, 7) : new Date(d.getFullYear(), d.getMonth() + 1, d.getDate());
 const sameWeek = (iso, start) => { const d = parse(iso); return d >= start && d < addDays(start, 7); };
 const money = (n) => (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const today0 = () => { const x = new Date(); x.setHours(0, 0, 0, 0); return x; };
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/* ---------- recurring: materialise any periods that have come due ---------- */
+function materializeRecurring(templates) {
+  const tnow = today0();
+  const additions = [];
+  const updated = templates.map((t) => {
+    let last = parse(t.lastDate);
+    let next = nextPeriod(last, t.cadence);
+    let guard = 0;
+    while (next <= tnow && guard < 520) {
+      additions.push({ id: crypto.randomUUID(), amount: t.amount, category: t.category, note: t.note, date: fmt(next), recurringId: t.id });
+      last = next; next = nextPeriod(last, t.cadence); guard++;
+    }
+    return { ...t, lastDate: fmt(last) };
+  });
+  return { additions, updated };
+}
+
+/* ---------- csv export ---------- */
+function exportCSV(expenses) {
+  const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const sorted = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
+  const rows = [["date", "category", "note", "amount"], ...sorted.map((e) => [e.date, e.category, e.note || "", e.amount])];
+  const csv = rows.map((r) => r.map(esc).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `life-ops-expenses-${fmt(new Date())}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
 
 /* ---------- storage (localStorage-backed; mirrors the {value} shape) ---------- */
 const STORE_PREFIX = "life-dashboard:";
@@ -63,11 +97,11 @@ const storage = {
   },
 };
 
-const KEYS = ["expenses", "budgets", "payments", "debts"];
+const KEYS = ["expenses", "budgets", "payments", "debts", "recurring"];
 async function loadAll() {
   const out = JSON.parse(JSON.stringify(DEFAULTS));
   for (const k of KEYS) {
-    try { const r = await storage.get(k); if (r && r.value) out[k] = JSON.parse(r.value); } catch (e) { /* missing key */ }
+    try { const r = await storage.get(k); if (r && r.value) out[k] = JSON.parse(r.value); } catch { /* missing key */ }
   }
   return out;
 }
@@ -77,7 +111,7 @@ async function save(key, value) {
 
 /* ---------- small ui ---------- */
 const Card = ({ children, style, className = "" }) => (
-  <div className={className} style={{ background: T.panel, borderRadius: 22, border: `1px solid ${T.line}`, boxShadow: "0 1px 2px rgba(56,69,74,.03), 0 18px 40px -24px rgba(56,69,74,.18)", ...style }}>{children}</div>
+  <div className={`card ${className}`} style={{ background: T.panel, borderRadius: 22, border: `1px solid ${T.line}`, boxShadow: "0 1px 2px rgba(56,69,74,.03), 0 18px 40px -24px rgba(56,69,74,.18)", ...style }}>{children}</div>
 );
 const Field = ({ children }) => <div className="flex flex-col gap-1">{children}</div>;
 const inputStyle = { background: "#FFFFFF", border: `1px solid ${T.line}`, color: T.ink, borderRadius: 12, padding: "10px 12px", fontSize: 14, outline: "none", width: "100%" };
@@ -94,6 +128,37 @@ function Progress({ value, max, color }) {
   );
 }
 
+/* measures its own width, then renders a fixed-size chart — avoids
+   recharts ResponsiveContainer's -1 first-paint warning entirely */
+function Chart({ height, children }) {
+  const ref = useRef(null);
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    if (!ref.current) return;
+    const ro = new ResizeObserver((entries) => { const cw = entries[0].contentRect.width; if (cw > 0) setW(Math.floor(cw)); });
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  return <div ref={ref} style={{ height, width: "100%" }}>{w > 0 ? children(w) : null}</div>;
+}
+
+function Segmented({ options, value, onChange }) {
+  return (
+    <div style={{ display: "inline-flex", background: T.bg, border: `1px solid ${T.line}`, borderRadius: 11, padding: 3, gap: 2 }}>
+      {options.map((o) => {
+        const on = o.value === value;
+        return (
+          <button key={o.value} onClick={() => onChange(o.value)}
+            style={{ border: "none", cursor: "pointer", borderRadius: 8, padding: "5px 12px", fontSize: 12.5, fontWeight: 600, letterSpacing: .2,
+              background: on ? T.panel2 : "transparent", color: on ? T.ink : T.sub, boxShadow: on ? "0 1px 2px rgba(56,69,74,.12)" : "none", transition: "all .15s ease" }}>
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ---------- main ---------- */
 export default function LifeDashboard() {
   const [loading, setLoading] = useState(true);
@@ -101,10 +166,24 @@ export default function LifeDashboard() {
   const [budgets, setBudgets] = useState(DEFAULTS.budgets);
   const [payments, setPayments] = useState([]);
   const [debts, setDebts] = useState([]);
+  const [recurring, setRecurring] = useState([]);
   const [weekRef, setWeekRef] = useState(() => weekStart(new Date()));
   const [showSettings, setShowSettings] = useState(false);
+  const [query, setQuery] = useState("");
+  const [filterCat, setFilterCat] = useState("");
+  const [trendMode, setTrendMode] = useState("weeks");
 
-  useEffect(() => { loadAll().then((d) => { setExpenses(d.expenses); setBudgets(d.budgets); setPayments(d.payments); setDebts(d.debts); setLoading(false); }); }, []);
+  useEffect(() => {
+    loadAll().then((d) => {
+      // roll any recurring expenses that have come due since last open
+      const { additions, updated } = materializeRecurring(d.recurring || []);
+      const allExp = additions.length ? [...additions, ...d.expenses] : d.expenses;
+      setExpenses(allExp);
+      setBudgets(d.budgets); setPayments(d.payments); setDebts(d.debts); setRecurring(updated);
+      if (additions.length) { save("expenses", allExp); save("recurring", updated); }
+      setLoading(false);
+    });
+  }, []);
 
   const mutate = useCallback((key, setter, next) => { setter(next); save(key, next); }, []);
 
@@ -114,6 +193,9 @@ export default function LifeDashboard() {
   const spent = useMemo(() => wkExpenses.reduce((s, e) => s + e.amount, 0), [wkExpenses]);
   const remaining = budgets.weekly - spent;
   const isThisWeek = +wkStart === +weekStart(new Date());
+
+  const lastWeekSpent = useMemo(() => expenses.filter((e) => sameWeek(e.date, addDays(wkStart, -7))).reduce((s, e) => s + e.amount, 0), [expenses, wkStart]);
+  const wowDelta = spent - lastWeekSpent;
 
   const byDay = useMemo(() => DOW.map((label, i) => {
     const dayIso = fmt(addDays(wkStart, i));
@@ -128,10 +210,46 @@ export default function LifeDashboard() {
       .concat(Object.keys(map).filter((k) => !budgets.categories.some((c) => c.name === k)).map((k, i) => ({ name: k, limit: 0, value: map[k], color: CAT_COLORS[(budgets.categories.length + i) % CAT_COLORS.length] })));
   }, [wkExpenses, budgets]);
 
-  /* pace: where you "should" be by today */
+  /* multi-week / multi-month trend */
+  const weeklyTrend = useMemo(() => {
+    const base = weekStart(new Date());
+    return Array.from({ length: 8 }, (_, i) => {
+      const s = addDays(base, -7 * (7 - i));
+      const total = expenses.filter((e) => sameWeek(e.date, s)).reduce((a, e) => a + e.amount, 0);
+      return { label: s.toLocaleDateString(undefined, { month: "short", day: "numeric" }), total, current: +s === +base };
+    });
+  }, [expenses]);
+  const monthlyTrend = useMemo(() => {
+    const now = new Date();
+    return Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const total = expenses.filter((e) => e.date.startsWith(key)).reduce((a, e) => a + e.amount, 0);
+      return { label: d.toLocaleDateString(undefined, { month: "short" }), total, current: i === 5 };
+    });
+  }, [expenses]);
+  const trendData = trendMode === "weeks" ? weeklyTrend : monthlyTrend;
+  const trendBudget = trendMode === "weeks" ? budgets.weekly : budgets.weekly * (52 / 12);
+  const trendAvg = trendData.length ? trendData.reduce((a, d) => a + d.total, 0) / trendData.length : 0;
+  const trendMax = Math.ceil(Math.max(trendBudget, ...trendData.map((d) => d.total)) * 1.1);
+
+  /* pace: where you "should" be by now (fractional, time-of-day aware) */
+  const elapsedFrac = useMemo(() => {
+    if (!isThisWeek) return 1;
+    const now = new Date();
+    const dIdx = (now.getDay() + 6) % 7;
+    const dayFrac = (now.getHours() * 60 + now.getMinutes()) / 1440;
+    return Math.min(1, (dIdx + dayFrac) / 7);
+  }, [isThisWeek]);
   const dayIdx = isThisWeek ? Math.min(6, (new Date().getDay() + 6) % 7) : 6;
-  const pace = budgets.weekly * ((dayIdx + 1) / 7);
+  const pace = budgets.weekly * elapsedFrac;
   const paceDelta = spent - pace;
+  const paceLabel = isThisWeek
+    ? (Math.abs(paceDelta) < 1 ? "on pace" : paceDelta > 0 ? `${money(paceDelta)} over pace` : `${money(-paceDelta)} under pace`)
+    : (remaining >= 0 ? `finished ${money(remaining)} under` : `finished ${money(-remaining)} over`);
+  const paceColor = isThisWeek
+    ? (Math.abs(paceDelta) < 1 ? T.sub : paceDelta > 0 ? T.amber : T.green)
+    : (remaining >= 0 ? T.green : T.rose);
 
   /* payments */
   const sortedPayments = useMemo(() => [...payments].sort((a, b) => (a.status === b.status ? a.dueDate.localeCompare(b.dueDate) : a.status === "unpaid" ? -1 : 1)), [payments]);
@@ -143,6 +261,35 @@ export default function LifeDashboard() {
   const iOwe = useMemo(() => debts.filter((d) => d.direction === "owe").reduce((s, d) => s + d.amount, 0), [debts]);
   const owedToMe = useMemo(() => debts.filter((d) => d.direction === "owed").reduce((s, d) => s + d.amount, 0), [debts]);
 
+  /* expense list: search + category filter */
+  const shownExpenses = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return wkExpenses.filter((e) =>
+      (!filterCat || e.category === filterCat) &&
+      (!q || `${e.note || ""} ${e.category}`.toLowerCase().includes(q)));
+  }, [wkExpenses, query, filterCat]);
+
+  /* add an expense, optionally setting up a recurring template */
+  const addExpense = (e, cadence) => {
+    let item = e;
+    if (cadence && cadence !== "once") {
+      const tmpl = { id: crypto.randomUUID(), amount: e.amount, category: e.category, note: e.note, cadence, lastDate: e.date };
+      mutate("recurring", setRecurring, [...recurring, tmpl]);
+      item = { ...e, recurringId: tmpl.id };
+    }
+    mutate("expenses", setExpenses, [item, ...expenses]);
+  };
+  const repeatExpense = (e) => mutate("expenses", setExpenses, [{ ...e, id: crypto.randomUUID(), date: fmt(new Date()), recurringId: undefined }, ...expenses]);
+
+  /* mark a payment paid — recurring bills roll forward to the next cycle */
+  const togglePaid = (p) => {
+    if (p.status === "unpaid" && p.recurring && p.recurring !== "once") {
+      mutate("payments", setPayments, payments.map((x) => x.id === p.id ? { ...x, dueDate: fmt(nextPeriod(parse(x.dueDate), x.recurring === "weekly" ? "weekly" : "monthly")) } : x));
+    } else {
+      mutate("payments", setPayments, payments.map((x) => x.id === p.id ? { ...x, status: x.status === "paid" ? "unpaid" : "paid" } : x));
+    }
+  };
+
   /* a quiet, time-of-day greeting */
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "good morning" : hour < 18 ? "good afternoon" : "good evening";
@@ -150,8 +297,8 @@ export default function LifeDashboard() {
   if (loading) return <div style={{ background: T.bg, color: T.sub, minHeight: 480, display: "grid", placeItems: "center", fontFamily: SERIF, fontStyle: "italic", fontSize: 16 }}>settling in…</div>;
 
   return (
-    <div style={{ background: T.bg, color: T.ink, minHeight: "100vh", fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif", padding: "28px clamp(16px,4vw,40px)" }}>
-      <style>{`*{box-sizing:border-box} input::placeholder{color:${T.faint}} .num{font-feature-settings:"tnum";font-variant-numeric:tabular-nums} .serif{font-family:${SERIF}}`}</style>
+    <div style={{ background: `radial-gradient(1100px 460px at 50% -240px, #FFFFFF, ${T.bg} 70%)`, color: T.ink, minHeight: "100vh", fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif", padding: "28px clamp(16px,4vw,40px)" }}>
+      <style>{`*{box-sizing:border-box} input::placeholder{color:${T.faint}} .num{font-feature-settings:"tnum";font-variant-numeric:tabular-nums} .serif{font-family:${SERIF}} .card{transition:transform .18s ease, border-color .18s ease} .card:hover{transform:translateY(-2px); border-color:#CCD9DA} .ico-btn:hover{color:${T.ink}!important}`}</style>
 
       {/* header */}
       <div className="flex items-center justify-between flex-wrap gap-3" style={{ marginBottom: 26, maxWidth: 1180, marginInline: "auto", width: "100%" }}>
@@ -161,6 +308,7 @@ export default function LifeDashboard() {
         </div>
         <div className="flex items-center gap-3">
           <span className="serif" style={{ color: T.sub, fontSize: 14, fontStyle: "italic" }}>{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</span>
+          <button style={ghost} onClick={() => exportCSV(expenses)} title="export all expenses to CSV"><Download size={15} /> export</button>
           <button style={ghost} onClick={() => setShowSettings(true)}><Settings size={15} /> budget</button>
         </div>
       </div>
@@ -168,10 +316,13 @@ export default function LifeDashboard() {
       <div style={{ maxWidth: 1180, marginInline: "auto" }}>
       {/* top stat strip */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", marginBottom: 16 }}>
-        <Stat icon={<Wallet size={16} />} label="spent this week" value={money(spent)} sub={`of ${money(budgets.weekly)} budget`} tint={T.blue} />
+        <Stat icon={<Wallet size={16} />} label="spent this week" value={money(spent)} tint={T.blue}
+          sub={lastWeekSpent > 0
+            ? <span style={{ color: wowDelta > 0 ? T.rose : T.green }}>{wowDelta > 0 ? "▲" : "▼"} {money(Math.abs(wowDelta))} vs last week</span>
+            : `of ${money(budgets.weekly)} budget`} />
         <Stat icon={<Wallet size={16} />} label="remaining" value={money(remaining)} sub={remaining < 0 ? "over budget" : "left to spend"} tint={remaining < 0 ? T.rose : T.green} />
-        <Stat icon={<CalendarClock size={16} />} label="unpaid bills" value={money(unpaidTotal)} sub={`${dueSoon.length} due within 7 days`} tint={overdue.length ? T.rose : T.amber} />
-        <Stat icon={<Users size={16} />} label="you owe" value={money(iOwe)} sub={owedToMe > 0 ? `${money(owedToMe)} owed to you` : "no one owes you"} tint={iOwe > 0 ? T.rose : T.green} />
+        <Stat icon={<CalendarClock size={16} />} label="unpaid bills" value={money(unpaidTotal)} sub={overdue.length ? `${overdue.length} overdue` : `${dueSoon.length} due within 7 days`} tint={overdue.length ? T.rose : T.amber} />
+        <Stat icon={<Users size={16} />} label="net owed" value={money(owedToMe - iOwe)} sub={iOwe > 0 ? `you owe ${money(iOwe)}` : "no one owes you"} tint={owedToMe - iOwe >= 0 ? T.green : T.rose} />
       </div>
 
       <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))" }}>
@@ -180,13 +331,12 @@ export default function LifeDashboard() {
         <Card className="p-5" style={{ gridColumn: "1 / -1" }}>
           <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 16 }}>
             <div className="flex items-center gap-2">
-              <button style={ghost} onClick={() => setWeekRef(addDays(wkStart, -7))}><ChevronLeft size={15} /></button>
+              <button className="ico-btn" style={ghost} onClick={() => setWeekRef(addDays(wkStart, -7))}><ChevronLeft size={15} /></button>
               <div className="serif" style={{ fontWeight: 500, fontSize: 19 }}>{isThisWeek ? "this week" : `week of ${wkStart.toLocaleDateString(undefined, { month: "long", day: "numeric" })}`}</div>
-              <button style={ghost} onClick={() => setWeekRef(addDays(wkStart, 7))} disabled={isThisWeek}><ChevronRight size={15} /></button>
+              <button className="ico-btn" style={ghost} onClick={() => setWeekRef(addDays(wkStart, 7))} disabled={isThisWeek}><ChevronRight size={15} /></button>
+              {!isThisWeek && <button style={{ ...ghost, color: T.blue, borderColor: "transparent" }} onClick={() => setWeekRef(weekStart(new Date()))}>today</button>}
             </div>
-            <div className="num" style={{ fontSize: 13, color: Math.abs(paceDelta) < 1 ? T.sub : paceDelta > 0 ? T.amber : T.green }}>
-              {paceDelta > 0 ? `${money(paceDelta)} ahead of pace` : `${money(-paceDelta)} under pace`}
-            </div>
+            <span className="num" style={{ fontSize: 12.5, fontWeight: 600, color: paceColor, background: paceColor + "22", borderRadius: 99, padding: "5px 12px" }}>{paceLabel}</span>
           </div>
 
           {/* big burn bar */}
@@ -200,32 +350,38 @@ export default function LifeDashboard() {
             {/* by day */}
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 12.5, color: T.sub, marginBottom: 10, fontWeight: 500 }}>by day</div>
-              <div style={{ height: 150 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={byDay} margin={{ top: 4, right: 0, bottom: 0, left: -22 }}>
-                    <XAxis dataKey="label" tick={{ fill: T.sub, fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: T.sub, fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <Tooltip cursor={{ fill: "rgba(56,69,74,.05)" }} contentStyle={{ background: T.panel2, border: `1px solid ${T.line}`, borderRadius: 12, color: T.ink, fontSize: 13, boxShadow: "0 8px 24px -12px rgba(56,69,74,.3)" }} formatter={(v) => [money(v), "spent"]} />
-                    <Bar dataKey="total" radius={[6, 6, 0, 0]}>
-                      {byDay.map((d, i) => <Cell key={i} fill={d.label === DOW[dayIdx] && isThisWeek ? T.blue : T.barIdle} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <Chart height={150}>{(w) => (
+                <BarChart width={w} height={150} data={byDay} margin={{ top: 4, right: 0, bottom: 0, left: -22 }}>
+                  <XAxis dataKey="label" tick={{ fill: T.sub, fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: T.sub, fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip cursor={{ fill: "rgba(56,69,74,.05)" }} contentStyle={{ background: T.panel2, border: `1px solid ${T.line}`, borderRadius: 12, color: T.ink, fontSize: 13, boxShadow: "0 8px 24px -12px rgba(56,69,74,.3)" }} formatter={(v) => [money(v), "spent"]} />
+                  <Bar dataKey="total" radius={[6, 6, 0, 0]}>
+                    {byDay.map((d, i) => <Cell key={i} fill={d.label === DOW[dayIdx] && isThisWeek ? T.blue : T.barIdle} />)}
+                  </Bar>
+                </BarChart>
+              )}</Chart>
             </div>
             {/* by category donut */}
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 12.5, color: T.sub, marginBottom: 10, fontWeight: 500 }}>by category</div>
-              <div style={{ height: 150 }}>
+              <div style={{ height: 150, position: "relative" }}>
                 {spent > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={byCat.filter((c) => c.value > 0)} dataKey="value" nameKey="name" innerRadius={40} outerRadius={62} paddingAngle={3} stroke="none">
-                        {byCat.filter((c) => c.value > 0).map((c, i) => <Cell key={i} fill={c.color} />)}
-                      </Pie>
-                      <Tooltip contentStyle={{ background: T.panel2, border: `1px solid ${T.line}`, borderRadius: 12, color: T.ink, fontSize: 13, boxShadow: "0 8px 24px -12px rgba(56,69,74,.3)" }} formatter={(v, n) => [money(v), n]} />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  <>
+                    <Chart height={150}>{(w) => (
+                      <PieChart width={w} height={150}>
+                        <Pie data={byCat.filter((c) => c.value > 0)} dataKey="value" nameKey="name" innerRadius={42} outerRadius={64} paddingAngle={3} stroke="none">
+                          {byCat.filter((c) => c.value > 0).map((c, i) => <Cell key={i} fill={c.color} />)}
+                        </Pie>
+                        <Tooltip contentStyle={{ background: T.panel2, border: `1px solid ${T.line}`, borderRadius: 12, color: T.ink, fontSize: 13, boxShadow: "0 8px 24px -12px rgba(56,69,74,.3)" }} formatter={(v, n) => [money(v), n]} />
+                      </PieChart>
+                    )}</Chart>
+                    <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}>
+                      <div style={{ textAlign: "center" }}>
+                        <div className="num" style={{ fontSize: 17, fontWeight: 600, color: T.ink }}>{money(spent)}</div>
+                        <div style={{ fontSize: 10.5, color: T.faint, letterSpacing: .3 }}>spent</div>
+                      </div>
+                    </div>
+                  </>
                 ) : <div className="serif" style={{ height: "100%", display: "grid", placeItems: "center", color: T.faint, fontSize: 14, fontStyle: "italic" }}>nothing logged yet</div>}
               </div>
             </div>
@@ -245,18 +401,56 @@ export default function LifeDashboard() {
           </div>
         </Card>
 
+        {/* ---- trends ---- */}
+        <Card className="p-5" style={{ gridColumn: "1 / -1" }}>
+          <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 16 }}>
+            <SectionTitle icon={<TrendingUp size={16} />} title="trends" noMargin />
+            <div className="flex items-center gap-3">
+              <span className="num" style={{ fontSize: 12.5, color: T.sub }}>avg {money(trendAvg)}</span>
+              <Segmented options={[{ value: "weeks", label: "weeks" }, { value: "months", label: "months" }]} value={trendMode} onChange={setTrendMode} />
+            </div>
+          </div>
+          <Chart height={170}>{(w) => (
+            <BarChart width={w} height={170} data={trendData} margin={{ top: 8, right: 4, bottom: 0, left: -14 }}>
+              <XAxis dataKey="label" tick={{ fill: T.sub, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis domain={[0, trendMax]} tick={{ fill: T.sub, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <Tooltip cursor={{ fill: "rgba(56,69,74,.05)" }} contentStyle={{ background: T.panel2, border: `1px solid ${T.line}`, borderRadius: 12, color: T.ink, fontSize: 13, boxShadow: "0 8px 24px -12px rgba(56,69,74,.3)" }} formatter={(v) => [money(v), "spent"]} />
+              <ReferenceLine y={trendBudget} stroke={T.amber} strokeDasharray="4 4" strokeWidth={1.5} />
+              <Bar dataKey="total" radius={[6, 6, 0, 0]}>
+                {trendData.map((d, i) => <Cell key={i} fill={d.total > trendBudget ? T.rose : d.current ? T.blue : T.barIdle} />)}
+              </Bar>
+            </BarChart>
+          )}</Chart>
+          <div style={{ fontSize: 11.5, color: T.faint, marginTop: 6 }}>dashed line = {trendMode === "weeks" ? "weekly" : "monthly"} budget ({money(trendBudget)})</div>
+        </Card>
+
         {/* ---- expenses ---- */}
         <Card className="p-5">
           <SectionTitle icon={<Wallet size={16} />} title="expenses" />
-          <ExpenseAdder categories={budgets.categories} onAdd={(e) => mutate("expenses", setExpenses, [e, ...expenses])} />
+          <ExpenseAdder categories={budgets.categories} onAdd={addExpense} />
+
+          {/* search + filter */}
+          <div className="flex gap-2" style={{ marginTop: 12 }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <Search size={14} color={T.faint} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)" }} />
+              <input style={{ ...inputStyle, paddingLeft: 32 }} placeholder="search" value={query} onChange={(e) => setQuery(e.target.value)} />
+            </div>
+            <select style={{ ...inputStyle, width: "auto" }} value={filterCat} onChange={(e) => setFilterCat(e.target.value)}>
+              <option value="">all</option>
+              {budgets.categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+            </select>
+          </div>
+
           <div style={{ marginTop: 14, maxHeight: 300, overflowY: "auto" }}>
             {wkExpenses.length === 0 && <Empty text="nothing logged this week yet" />}
-            {wkExpenses.map((e) => (
-              <Row key={e.id} onDelete={() => mutate("expenses", setExpenses, expenses.filter((x) => x.id !== e.id))}>
+            {wkExpenses.length > 0 && shownExpenses.length === 0 && <Empty text="no matches" />}
+            {shownExpenses.map((e) => (
+              <Row key={e.id} onDelete={() => mutate("expenses", setExpenses, expenses.filter((x) => x.id !== e.id))} onRepeat={() => repeatExpense(e)}>
                 <div style={{ minWidth: 0 }}>
                   <div className="flex items-center gap-2" style={{ fontSize: 14 }}>
                     <span style={{ width: 7, height: 7, borderRadius: 9, background: CAT_COLORS[budgets.categories.findIndex((c) => c.name === e.category) % CAT_COLORS.length] || T.sub, flexShrink: 0 }} />
                     <span style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.note || e.category}</span>
+                    {e.recurringId && <Repeat size={11} color={T.faint} />}
                   </div>
                   <div style={{ fontSize: 12, color: T.sub, marginTop: 3 }}>{e.category} · {parse(e.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div>
                 </div>
@@ -290,8 +484,8 @@ export default function LifeDashboard() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="num" style={{ fontWeight: 600, opacity: p.status === "paid" ? 0.45 : 1 }}>{money(p.amount)}</span>
-                    <button title={p.status === "paid" ? "mark unpaid" : "mark paid"} style={{ ...ghost, padding: 7, color: p.status === "paid" ? T.green : T.sub }}
-                      onClick={() => mutate("payments", setPayments, payments.map((x) => x.id === p.id ? { ...x, status: x.status === "paid" ? "unpaid" : "paid" } : x))}><Check size={14} /></button>
+                    <button title={p.recurring && p.recurring !== "once" ? "mark paid · roll to next cycle" : p.status === "paid" ? "mark unpaid" : "mark paid"} style={{ ...ghost, padding: 7, color: p.status === "paid" ? T.green : T.sub }}
+                      onClick={() => togglePaid(p)}><Check size={14} /></button>
                   </div>
                 </Row>
               );
@@ -319,7 +513,7 @@ export default function LifeDashboard() {
                   </div>
                   {d.note && <div style={{ fontSize: 12, color: T.sub, marginTop: 3 }}>{d.note}</div>}
                 </div>
-                <span className="num" style={{ fontWeight: 600, color: d.direction === "owe" ? T.rose : T.green }}>{d.direction === "owe" ? "-" : "+"}{money(d.amount).replace("$", "$")}</span>
+                <span className="num" style={{ fontWeight: 600, color: d.direction === "owe" ? T.rose : T.green }}>{d.direction === "owe" ? "-" : "+"}{money(d.amount)}</span>
               </Row>
             ))}
           </div>
@@ -327,7 +521,9 @@ export default function LifeDashboard() {
       </div>
       </div>
 
-      {showSettings && <BudgetSettings budgets={budgets} onSave={(b) => { mutate("budgets", setBudgets, b); setShowSettings(false); }} onClose={() => setShowSettings(false)} />}
+      {showSettings && <BudgetSettings budgets={budgets} recurring={recurring}
+        onDeleteRecurring={(id) => mutate("recurring", setRecurring, recurring.filter((r) => r.id !== id))}
+        onSave={(b) => { mutate("budgets", setBudgets, b); setShowSettings(false); }} onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
@@ -335,15 +531,15 @@ export default function LifeDashboard() {
 /* ---------- subcomponents ---------- */
 function Stat({ icon, label, value, sub, tint }) {
   return (
-    <Card className="p-5">
+    <Card className="p-5" style={{ borderTop: `2.5px solid ${tint}` }}>
       <div className="flex items-center gap-2" style={{ color: tint, fontSize: 12.5, fontWeight: 500 }}>{icon}{label}</div>
       <div className="num" style={{ fontSize: 25, fontWeight: 600, margin: "8px 0 3px", color: T.ink }}>{value}</div>
       <div style={{ fontSize: 12, color: T.sub }}>{sub}</div>
     </Card>
   );
 }
-function SectionTitle({ icon, title }) {
-  return <div className="flex items-center gap-2 serif" style={{ fontWeight: 500, fontSize: 18, marginBottom: 14 }}><span style={{ color: T.blue }}>{icon}</span>{title}</div>;
+function SectionTitle({ icon, title, noMargin }) {
+  return <div className="flex items-center gap-2 serif" style={{ fontWeight: 500, fontSize: 18, marginBottom: noMargin ? 0 : 14 }}><span style={{ color: T.blue }}>{icon}</span>{title}</div>;
 }
 function Empty({ text }) { return <div className="serif" style={{ color: T.faint, fontSize: 14, fontStyle: "italic", padding: "16px 2px", textAlign: "center" }}>{text}</div>; }
 function Mini({ label, value, tint }) {
@@ -352,11 +548,14 @@ function Mini({ label, value, tint }) {
     <div className="num" style={{ fontSize: 15, fontWeight: 600, color: tint }}>{value}</div>
   </div>;
 }
-function Row({ children, onDelete }) {
+function Row({ children, onDelete, onRepeat }) {
   return (
     <div className="flex items-center justify-between gap-3 group" style={{ padding: "11px 2px", borderBottom: `1px solid ${T.line}` }}>
       <div className="flex items-center justify-between gap-3" style={{ flex: 1, minWidth: 0 }}>{children}</div>
-      <button onClick={onDelete} title="remove" style={{ background: "transparent", border: "none", color: T.faint, cursor: "pointer", padding: 4 }}><Trash2 size={14} /></button>
+      <div className="flex items-center gap-1">
+        {onRepeat && <button onClick={onRepeat} title="log again today" style={{ background: "transparent", border: "none", color: T.faint, cursor: "pointer", padding: 4 }}><Repeat size={14} /></button>}
+        <button onClick={onDelete} title="remove" style={{ background: "transparent", border: "none", color: T.faint, cursor: "pointer", padding: 4 }}><Trash2 size={14} /></button>
+      </div>
     </div>
   );
 }
@@ -366,11 +565,12 @@ function ExpenseAdder({ categories, onAdd }) {
   const [category, setCategory] = useState(categories[0]?.name || "Other");
   const [note, setNote] = useState("");
   const [date, setDate] = useState(fmt(new Date()));
+  const [cadence, setCadence] = useState("once");
   const add = () => {
     const a = parseFloat(amount);
     if (!a || a <= 0) return;
-    onAdd({ id: crypto.randomUUID(), amount: a, category, note: note.trim(), date });
-    setAmount(""); setNote("");
+    onAdd({ id: crypto.randomUUID(), amount: a, category, note: note.trim(), date }, cadence);
+    setAmount(""); setNote(""); setCadence("once");
   };
   return (
     <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
@@ -380,7 +580,11 @@ function ExpenseAdder({ categories, onAdd }) {
       </select>
       <input style={inputStyle} placeholder="note (optional)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
       <input style={inputStyle} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      <button style={{ ...btn(T.blue), gridColumn: "1 / -1", justifyContent: "center" }} onClick={add}><Plus size={15} /> log expense</button>
+      <div className="flex items-center justify-between gap-2" style={{ gridColumn: "1 / -1" }}>
+        <Segmented options={[{ value: "once", label: "once" }, { value: "weekly", label: "weekly" }, { value: "monthly", label: "monthly" }]} value={cadence} onChange={setCadence} />
+        {cadence !== "once" && <span style={{ fontSize: 11.5, color: T.faint }}>auto-logs each {cadence.replace("ly", "")}</span>}
+      </div>
+      <button style={{ ...btn(T.blue), gridColumn: "1 / -1", justifyContent: "center" }} onClick={add}><Plus size={15} /> {cadence === "once" ? "log expense" : "log + set recurring"}</button>
     </div>
   );
 }
@@ -436,7 +640,7 @@ function DebtAdder({ onAdd }) {
   );
 }
 
-function BudgetSettings({ budgets, onSave, onClose }) {
+function BudgetSettings({ budgets, recurring, onDeleteRecurring, onSave, onClose }) {
   const [weekly, setWeekly] = useState(budgets.weekly);
   const [cats, setCats] = useState(budgets.categories);
   const sumCats = cats.reduce((s, c) => s + (parseFloat(c.limit) || 0), 0);
@@ -463,7 +667,25 @@ function BudgetSettings({ budgets, onSave, onClose }) {
             ))}
           </div>
           <button style={{ ...ghost, marginTop: 12, width: "100%", justifyContent: "center" }} onClick={() => setCats([...cats, { name: "New", limit: 0 }])}><Plus size={14} /> add category</button>
-          <button style={{ ...btn(T.blue), marginTop: 14, width: "100%", justifyContent: "center" }} onClick={() => onSave({ weekly, categories: cats.filter((c) => c.name.trim()) })}>save budget</button>
+
+          {recurring && recurring.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div className="flex items-center gap-2" style={{ fontSize: 13, color: T.sub, marginBottom: 8 }}><Repeat size={14} /> recurring expenses</div>
+              <div className="flex flex-col gap-2">
+                {recurring.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between" style={{ background: T.bg, border: `1px solid ${T.line}`, borderRadius: 12, padding: "8px 11px" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600 }}>{r.note || r.category}</div>
+                      <div style={{ fontSize: 11.5, color: T.sub }}>{money(r.amount)} · {r.category} · {r.cadence}</div>
+                    </div>
+                    <button style={{ background: "transparent", border: "none", color: T.faint, cursor: "pointer" }} onClick={() => onDeleteRecurring(r.id)}><Trash2 size={15} /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button style={{ ...btn(T.blue), marginTop: 18, width: "100%", justifyContent: "center" }} onClick={() => onSave({ weekly, categories: cats.filter((c) => c.name.trim()) })}>save budget</button>
         </div>
       </Card>
     </div>
