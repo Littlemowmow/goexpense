@@ -233,7 +233,7 @@ export default function GOexpense() {
 
   /* auth: current session + subscribe to changes */
   useEffect(() => {
-    if (!supabaseConfigured) return;
+    if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
@@ -255,7 +255,9 @@ export default function GOexpense() {
           const { additions, updated } = materializeRecurring(d.recurring);
           if (additions.length) {
             await db.addExpensesBatch(additions);
+            if (cancelled) return;
             await Promise.all(updated.filter((u, i) => u.lastDate !== d.recurring[i].lastDate).map((u) => db.updateRecurringLastDate(u.id, u.lastDate)));
+            if (cancelled) return;
             d = await fetchAll();
             nextBudgets = d.budgets || nextBudgets;
           }
@@ -359,28 +361,37 @@ export default function GOexpense() {
   const fail = (action) => (err) => { console.error(action, err); setDataError(`Couldn't ${action}: ${err.message || err}`); };
 
   const addExpense = async (e, cadence) => {
+    let createdTemplate;
     try {
       let recurringId;
       if (cadence && cadence !== "once") {
-        const t = await db.addRecurring({ amount: e.amount, category: e.category, note: e.note, cadence, lastDate: e.date });
-        setRecurring((r) => [...r, t]); recurringId = t.id;
+        createdTemplate = await db.addRecurring({ amount: e.amount, category: e.category, note: e.note, cadence, lastDate: e.date });
+        setRecurring((r) => [...r, createdTemplate]); recurringId = createdTemplate.id;
       }
       const row = await db.addExpense({ ...e, recurringId });
       setExpenses((x) => [row, ...x]);
-    } catch (err) { fail("save expense")(err); }
+    } catch (err) {
+      if (createdTemplate) { setRecurring((r) => r.filter((x) => x.id !== createdTemplate.id)); db.delRecurring(createdTemplate.id).catch(() => {}); }
+      fail("save expense")(err);
+    }
   };
   const repeatExpense = async (e) => {
-    try { const row = await db.addExpense({ amount: e.amount, category: e.category, note: e.note, date: fmt(new Date()) }); setExpenses((x) => [row, ...x]); }
-    catch (err) { fail("repeat expense")(err); }
+    try {
+      const row = await db.addExpense({ amount: e.amount, category: e.category, note: e.note, date: fmt(new Date()) });
+      setExpenses((x) => [row, ...x]);
+      if (!isThisWeek) setWeekRef(weekStart(new Date())); // keep the freshly-logged expense in view
+    } catch (err) { fail("repeat expense")(err); }
   };
   const removeExpense = async (id) => {
-    const prev = expenses; setExpenses((x) => x.filter((e) => e.id !== id));
-    try { await db.delExpense(id); } catch (err) { setExpenses(prev); fail("delete expense")(err); }
+    const item = expenses.find((e) => e.id === id);
+    setExpenses((x) => x.filter((e) => e.id !== id));
+    try { await db.delExpense(id); } catch (err) { if (item) setExpenses((x) => [item, ...x]); fail("delete expense")(err); }
   };
   const addPayment = async (p) => { try { const row = await db.addPayment(p); setPayments((x) => [...x, row]); } catch (err) { fail("add payment")(err); } };
   const removePayment = async (id) => {
-    const prev = payments; setPayments((x) => x.filter((p) => p.id !== id));
-    try { await db.delPayment(id); } catch (err) { setPayments(prev); fail("delete payment")(err); }
+    const item = payments.find((p) => p.id === id);
+    setPayments((x) => x.filter((p) => p.id !== id));
+    try { await db.delPayment(id); } catch (err) { if (item) setPayments((x) => [...x, item]); fail("delete payment")(err); }
   };
   const togglePaid = async (p) => {
     const prev = payments;
@@ -398,12 +409,14 @@ export default function GOexpense() {
   };
   const addDebt = async (d) => { try { const row = await db.addDebt(d); setDebts((x) => [...x, row]); } catch (err) { fail("add IOU")(err); } };
   const removeDebt = async (id) => {
-    const prev = debts; setDebts((x) => x.filter((d) => d.id !== id));
-    try { await db.delDebt(id); } catch (err) { setDebts(prev); fail("delete IOU")(err); }
+    const item = debts.find((d) => d.id === id);
+    setDebts((x) => x.filter((d) => d.id !== id));
+    try { await db.delDebt(id); } catch (err) { if (item) setDebts((x) => [...x, item]); fail("delete IOU")(err); }
   };
   const removeRecurring = async (id) => {
-    const prev = recurring; setRecurring((r) => r.filter((x) => x.id !== id));
-    try { await db.delRecurring(id); } catch (err) { setRecurring(prev); fail("delete recurring")(err); }
+    const item = recurring.find((r) => r.id === id);
+    setRecurring((r) => r.filter((x) => x.id !== id));
+    try { await db.delRecurring(id); } catch (err) { if (item) setRecurring((r) => [...r, item]); fail("delete recurring")(err); }
   };
   const saveBudget = async (b) => { const prev = budgets; setBudgets(b); setShowSettings(false); try { await db.upsertBudget(b, userId); } catch (err) { setBudgets(prev); fail("save budget")(err); } };
   const loadSample = async () => {
@@ -411,9 +424,13 @@ export default function GOexpense() {
     catch (err) { fail("load sample data")(err); }
   };
   const clearAll = async () => {
-    const snap = { expenses, payments, debts, recurring };
     setExpenses([]); setPayments([]); setDebts([]); setRecurring([]);
-    try { await db.clearAll(); } catch (err) { setExpenses(snap.expenses); setPayments(snap.payments); setDebts(snap.debts); setRecurring(snap.recurring); fail("clear data")(err); }
+    try { await db.clearAll(); }
+    catch (err) {
+      fail("clear data")(err);
+      // some tables may have cleared; reconcile UI with actual DB state
+      try { const d = await fetchAll(); setExpenses(d.expenses); setPayments(d.payments); setDebts(d.debts); setRecurring(d.recurring); } catch { /* leave cleared */ }
+    }
   };
   const signOut = async () => {
     await supabase.auth.signOut();
@@ -789,7 +806,7 @@ function DebtAdder({ onAdd }) {
 
 function BudgetSettings({ budgets, recurring, onDeleteRecurring, onClearAll, onSave, onClose }) {
   const [weekly, setWeekly] = useState(budgets.weekly);
-  const [cats, setCats] = useState(budgets.categories);
+  const [cats, setCats] = useState(() => budgets.categories.map((c) => ({ ...c, _k: crypto.randomUUID() })));
   const sumCats = cats.reduce((s, c) => s + (parseFloat(c.limit) || 0), 0);
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(56,69,74,.28)", backdropFilter: "blur(3px)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }} onClick={onClose}>
@@ -806,14 +823,14 @@ function BudgetSettings({ budgets, recurring, onDeleteRecurring, onClearAll, onS
           <div style={{ fontSize: 12, color: T.sub, margin: "8px 0 12px" }}>category limits sum to {money(sumCats)}</div>
           <div className="flex flex-col gap-2">
             {cats.map((c, i) => (
-              <div key={i} className="flex gap-2 items-center">
+              <div key={c._k} className="flex gap-2 items-center">
                 <input style={{ ...inputStyle, flex: 2 }} value={c.name} onChange={(e) => setCats(cats.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
                 <input style={{ ...inputStyle, flex: 1 }} type="number" value={c.limit} onChange={(e) => setCats(cats.map((x, j) => j === i ? { ...x, limit: parseFloat(e.target.value) || 0 } : x))} />
                 <button style={{ background: "transparent", border: "none", color: T.faint, cursor: "pointer" }} onClick={() => setCats(cats.filter((_, j) => j !== i))}><Trash2 size={15} /></button>
               </div>
             ))}
           </div>
-          <button style={{ ...ghost, marginTop: 12, width: "100%", justifyContent: "center" }} onClick={() => setCats([...cats, { name: "New", limit: 0 }])}><Plus size={14} /> add category</button>
+          <button style={{ ...ghost, marginTop: 12, width: "100%", justifyContent: "center" }} onClick={() => setCats([...cats, { name: "New", limit: 0, _k: crypto.randomUUID() }])}><Plus size={14} /> add category</button>
 
           {recurring && recurring.length > 0 && (
             <div style={{ marginTop: 20 }}>
@@ -832,7 +849,7 @@ function BudgetSettings({ budgets, recurring, onDeleteRecurring, onClearAll, onS
             </div>
           )}
 
-          <button style={{ ...btn(T.blue), marginTop: 18, width: "100%", justifyContent: "center" }} onClick={() => onSave({ weekly, categories: cats.filter((c) => c.name.trim()) })}>save budget</button>
+          <button style={{ ...btn(T.blue), marginTop: 18, width: "100%", justifyContent: "center" }} onClick={() => onSave({ weekly, categories: cats.filter((c) => c.name.trim()).map((c) => ({ name: c.name, limit: c.limit })) })}>save budget</button>
           {onClearAll && (
             <button style={{ ...ghost, marginTop: 10, width: "100%", justifyContent: "center", color: T.rose, borderColor: "#E8D6D0" }}
               onClick={() => { if (window.confirm("Clear all expenses, payments, debts, and recurring items? This can't be undone.")) onClearAll(); }}>
