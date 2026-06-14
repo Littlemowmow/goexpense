@@ -1,0 +1,46 @@
+{"ts":"2026-06-13T13:38:03.001Z","cmd":"goto","args":"http://localhost:5173/","origin":"http://localhost:5173/","durationMs":102,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:38:04.063Z","cmd":"console","args":"--errors","origin":"http://localhost:5173/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:38:04.096Z","cmd":"js","args":"document.body.innerText.slice(0,200)","origin":"http://localhost:5173/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:38:04.180Z","cmd":"screenshot","args":"/tmp/life-dash.png","origin":"http://localhost:5173/","durationMs":55,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:38:44.666Z","cmd":"fill","args":"input[type=number] 42.50","origin":"http://localhost:5173/","durationMs":15,"status":"error","hasCookies":false,"mode":"launched","error":"fill: Error: strict mode violation: locator('input[type=number]') resolved to 3 elements:\n    1) <input value=\"\" type=\"number\" placeholder=\"Amount\"/> aka getByPlaceholder('Amount').first()\n    2) <input value=\"\" type=\"number\" placeholder=\"Amount\"/> aka getByPlaceholder('Amount').nth(1)\n    3) <input…"}
+{"ts":"2026-06-13T13:38:44.720Z","cmd":"fill","args":"input[placeholder=\"Note (optional)\"] Lunch test","origin":"http://localhost:5173/","durationMs":22,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:38:44.753Z","cmd":"js","args":"[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Log expense')).click(); 'clicked'","origin":"http://localhost:5173/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:38:45.799Z","cmd":"js","args":"document.body.innerText.match(/Spent this week\\s*\\n?\\$[0-9.,]+/)?.[0] || 'not found'","origin":"http://localhost:5173/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:38:45.833Z","cmd":"js","args":"localStorage.getItem('life-dashboard:expenses')","origin":"http://localhost:5173/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:38:45.884Z","cmd":"reload","args":"","origin":"http://localhost:5173/","durationMs":20,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:38:46.941Z","cmd":"js","args":"document.body.innerText.includes('Lunch test') ? 'PERSISTED: Lunch test visible after reload' : 'LOST'","origin":"http://localhost:5173/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:39:21.950Z","cmd":"eval","args":"/tmp/log-expense.js","origin":"http://localhost:5173/","durationMs":2,"status":"error","hasCookies":false,"mode":"launched","error":"evaluate: SyntaxError: Illegal return statement\n    at eval (<anonymous>)\n    at UtilityScript.evaluate (<anonymous>:290:30)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)"}
+{"ts":"2026-06-13T13:39:23.007Z","cmd":"js","args":"localStorage.getItem('life-dashboard:expenses')","origin":"http://localhost:5173/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:39:23.059Z","cmd":"reload","args":"","origin":"http://localhost:5173/","durationMs":17,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:39:24.115Z","cmd":"js","args":"(() => { const t = document.body.innerText; const m = t.match(/Spent this week\\s+(\\$[\\d.,]+)/); return 'spent='+(m?m[1]:'?')+' | lunchVisible='+t.includes('Lunch test'); })()","origin":"http://localhost:5173/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:39:38.177Z","cmd":"eval","args":"/tmp/log-expense.js","origin":"http://localhost:5173/","durationMs":33,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:39:39.231Z","cmd":"js","args":"localStorage.getItem('life-dashboard:expenses')","origin":"http://localhost:5173/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:39:39.282Z","cmd":"reload","args":"","origin":"http://localhost:5173/","durationMs":14,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:39:40.332Z","cmd":"js","args":"(() => { const t = document.body.innerText; const m = t.match(/Spent this week\\s+(\\$[\\d.,]+)/); return 'spent='+(m?m[1]:'?')+' | lunchVisible='+t.includes('Lunch test'); })()","origin":"http://localhost:5173/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:40:02.482Z","cmd":"screenshot","args":"/tmp/life-dash-data.png","origin":"http://localhost:5173/","durationMs":45,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T13:40:02.515Z","cmd":"js","args":"localStorage.removeItem('life-dashboard:expenses'); 'cleared'","origin":"http://localhost:5173/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T18:19:25.818Z","cmd":"goto","args":"http://localhost:5173/","origin":"http://localhost:5173/","durationMs":96,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T18:19:26.968Z","cmd":"eval","args":"/tmp/seed.js","origin":"http://localhost:5173/","durationMs":81,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T18:19:28.027Z","cmd":"console","args":"--errors","origin":"http://localhost:5173/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T18:19:28.157Z","cmd":"screenshot","args":"/tmp/life-dash-serene.png","origin":"http://localhost:5173/","durationMs":95,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T18:20:44.612Z","cmd":"js","args":"localStorage.removeItem('life-dashboard:expenses'); 'cleared'","origin":"http://localhost:5173/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:01:33.783Z","cmd":"goto","args":"http://localhost:5173","origin":"http://localhost:5173/","durationMs":91,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:01:33.857Z","cmd":"console","args":"--errors","origin":"http://localhost:5173/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:01:33.914Z","cmd":"network","args":"","origin":"http://localhost:5173/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:01:34.006Z","cmd":"screenshot","args":"/tmp/lifedash-main.png","origin":"http://localhost:5173/","durationMs":57,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:01:54.076Z","cmd":"snapshot","args":"-i","origin":"http://localhost:5173/","durationMs":11,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:08.277Z","cmd":"fill","args":"@e4 42.50","origin":"http://localhost:5173/","durationMs":15,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:08.310Z","cmd":"select","args":"@e5 Food","origin":"http://localhost:5173/","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:08.345Z","cmd":"fill","args":"@e12 lunch","origin":"http://localhost:5173/","durationMs":5,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:08.424Z","cmd":"click","args":"@e14","origin":"http://localhost:5173/","durationMs":50,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:08.458Z","cmd":"fill","args":"@e4 85","origin":"http://localhost:5173/","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:08.491Z","cmd":"select","args":"@e5 Groceries","origin":"http://localhost:5173/","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:08.560Z","cmd":"click","args":"@e14","origin":"http://localhost:5173/","durationMs":39,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:08.595Z","cmd":"fill","args":"@e4 20","origin":"http://localhost:5173/","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:08.628Z","cmd":"select","args":"@e5 Transport","origin":"http://localhost:5173/","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:08.701Z","cmd":"click","args":"@e14","origin":"http://localhost:5173/","durationMs":43,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:09.792Z","cmd":"screenshot","args":"/tmp/lifedash-data.png","origin":"http://localhost:5173/","durationMs":41,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:09.823Z","cmd":"console","args":"--errors","origin":"http://localhost:5173/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:34.609Z","cmd":"viewport","args":"390x844","origin":"http://localhost:5173/","durationMs":4,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:35.701Z","cmd":"screenshot","args":"/tmp/lifedash-mobile.png","origin":"http://localhost:5173/","durationMs":38,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-14T21:02:35.735Z","cmd":"viewport","args":"1280x720","origin":"http://localhost:5173/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
