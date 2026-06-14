@@ -6,7 +6,7 @@ import {
 import {
   Wallet, CalendarClock, Users, Plus, Trash2, Check, Settings,
   ChevronLeft, ChevronRight, AlertTriangle, ArrowDownRight, ArrowUpRight, X,
-  Repeat, Download, Search, TrendingUp,
+  Repeat, Download, Search, TrendingUp, Sparkles,
 } from "lucide-react";
 
 /* ---------- theme: coastal mist (calm, light) ---------- */
@@ -69,6 +69,36 @@ function materializeRecurring(templates) {
     return { ...t, lastDate: fmt(last) };
   });
   return { additions, updated };
+}
+
+/* ---------- sample data (so an empty dashboard can demo itself) ---------- */
+function buildSample() {
+  const today = today0();
+  const ws = weekStart(today);
+  const elapsed = Math.round((today - ws) / 86400000); // 0..6
+  const uid = () => crypto.randomUUID();
+  const exp = [];
+  const tw = [["Food", 18.5, "lunch"], ["Groceries", 64, "weekly shop"], ["Transport", 12, "metro"], ["Fun", 28, "cinema"], ["Subscriptions", 11.99, "spotify"], ["Food", 9.5, "coffee"], ["Food", 22, "dinner"]];
+  tw.forEach((r, i) => exp.push({ id: uid(), amount: r[1], category: r[0], note: r[2], date: fmt(addDays(ws, Math.min(i, elapsed))) }));
+  const cats = ["Food", "Groceries", "Transport", "Fun", "Subscriptions", "Other"];
+  for (let wk = 1; wk <= 7; wk++) {
+    const base = addDays(ws, -7 * wk);
+    const n = 3 + ((wk * 7) % 4);
+    for (let i = 0; i < n; i++) exp.push({ id: uid(), amount: 15 + ((wk * 13 + i * 7) % 70), category: cats[(wk + i) % 6], note: "", date: fmt(addDays(base, i % 6)) });
+  }
+  return {
+    expenses: exp,
+    payments: [
+      { id: uid(), name: "Rent", amount: 1200, dueDate: fmt(addDays(today, 3)), recurring: "monthly", status: "unpaid" },
+      { id: uid(), name: "Electricity", amount: 64.2, dueDate: fmt(addDays(today, -2)), recurring: "monthly", status: "unpaid" },
+      { id: uid(), name: "Netflix", amount: 15.99, dueDate: fmt(addDays(today, 12)), recurring: "monthly", status: "paid" },
+    ],
+    debts: [
+      { id: uid(), person: "Sara", amount: 40, note: "concert ticket", direction: "owed" },
+      { id: uid(), person: "Mike", amount: 25, note: "dinner", direction: "owe" },
+    ],
+    recurring: [{ id: uid(), amount: 11.99, category: "Subscriptions", note: "Spotify", cadence: "monthly", lastDate: fmt(today) }],
+  };
 }
 
 /* ---------- csv export ---------- */
@@ -290,6 +320,22 @@ export default function LifeDashboard() {
     }
   };
 
+  /* sample data + reset (so an empty dashboard can demo itself) */
+  const isEmpty = expenses.length === 0 && payments.length === 0 && debts.length === 0;
+  const loadSample = () => {
+    const s = buildSample();
+    mutate("expenses", setExpenses, s.expenses);
+    mutate("payments", setPayments, s.payments);
+    mutate("debts", setDebts, s.debts);
+    mutate("recurring", setRecurring, s.recurring);
+  };
+  const clearAll = () => {
+    mutate("expenses", setExpenses, []);
+    mutate("payments", setPayments, []);
+    mutate("debts", setDebts, []);
+    mutate("recurring", setRecurring, []);
+  };
+
   /* a quiet, time-of-day greeting */
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "good morning" : hour < 18 ? "good afternoon" : "good evening";
@@ -314,6 +360,14 @@ export default function LifeDashboard() {
       </div>
 
       <div style={{ maxWidth: 1180, marginInline: "auto" }}>
+      {/* first-run nudge: let an empty dashboard demo itself */}
+      {isEmpty && (
+        <Card className="p-4" style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div className="serif" style={{ color: T.sub, fontStyle: "italic", fontSize: 14.5 }}>nothing logged yet — want to see it filled in with a few weeks of sample data?</div>
+          <button style={btn(T.blue)} onClick={loadSample}><Sparkles size={15} /> load sample data</button>
+        </Card>
+      )}
+
       {/* top stat strip */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", marginBottom: 16 }}>
         <Stat icon={<Wallet size={16} />} label="spent this week" value={money(spent)} tint={T.blue}
@@ -523,6 +577,7 @@ export default function LifeDashboard() {
 
       {showSettings && <BudgetSettings budgets={budgets} recurring={recurring}
         onDeleteRecurring={(id) => mutate("recurring", setRecurring, recurring.filter((r) => r.id !== id))}
+        onClearAll={() => { clearAll(); setShowSettings(false); }}
         onSave={(b) => { mutate("budgets", setBudgets, b); setShowSettings(false); }} onClose={() => setShowSettings(false)} />}
     </div>
   );
@@ -640,7 +695,7 @@ function DebtAdder({ onAdd }) {
   );
 }
 
-function BudgetSettings({ budgets, recurring, onDeleteRecurring, onSave, onClose }) {
+function BudgetSettings({ budgets, recurring, onDeleteRecurring, onClearAll, onSave, onClose }) {
   const [weekly, setWeekly] = useState(budgets.weekly);
   const [cats, setCats] = useState(budgets.categories);
   const sumCats = cats.reduce((s, c) => s + (parseFloat(c.limit) || 0), 0);
@@ -686,6 +741,12 @@ function BudgetSettings({ budgets, recurring, onDeleteRecurring, onSave, onClose
           )}
 
           <button style={{ ...btn(T.blue), marginTop: 18, width: "100%", justifyContent: "center" }} onClick={() => onSave({ weekly, categories: cats.filter((c) => c.name.trim()) })}>save budget</button>
+          {onClearAll && (
+            <button style={{ ...ghost, marginTop: 10, width: "100%", justifyContent: "center", color: T.rose, borderColor: "#E8D6D0" }}
+              onClick={() => { if (window.confirm("Clear all expenses, payments, debts, and recurring items? This can't be undone.")) onClearAll(); }}>
+              <Trash2 size={14} /> clear all data
+            </button>
+          )}
         </div>
       </Card>
     </div>
