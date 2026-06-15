@@ -7,27 +7,42 @@ import {
   Wallet, CalendarClock, Users, Plus, Trash2, Check, Settings,
   ChevronLeft, ChevronRight, AlertTriangle, ArrowDownRight, ArrowUpRight, X,
   Repeat, Download, Search, TrendingUp, Sparkles, LogOut, Maximize2, Pencil,
-  PiggyBank, Target, CalendarDays,
+  PiggyBank, Target, CalendarDays, Moon, Sun,
 } from "lucide-react";
 import { exportPDF } from "./report";
 import { supabase, supabaseConfigured } from "./supabase";
 import { fetchAll, db } from "./db";
 
-/* ---------- theme: coastal mist (calm, light) ---------- */
-const T = {
-  bg: "#EEF3F4", panel: "#FBFDFD", panel2: "#FFFFFF", line: "#DEE7E8",
-  ink: "#38454A", sub: "#7A8990", faint: "#A9B6BA",
-  blue: "#7FA6A3",   // soft teal — primary
-  green: "#9DB89A",  // sage — positive
-  amber: "#CBA36A",  // muted gold — due soon
-  rose: "#C28B7E",   // dusty clay — alerts / negative
-  violet: "#A99BC0", // dusty lavender — IOUs
-  track: "#E4ECED",
-  barIdle: "#CBDADC",
+/* ---------- theme: coastal mist — light + dark, a touch bolder ---------- */
+const LIGHT = {
+  bg: "#E7EFF0", panel: "#FBFDFD", panel2: "#FFFFFF", line: "#D9E5E6",
+  ink: "#2C3A3F", sub: "#677880", faint: "#A2B1B6",
+  blue: "#4F9A93",   // teal — primary (more saturated)
+  green: "#6FAE7C",  // sage — positive
+  amber: "#C8923F",  // gold — due soon
+  rose: "#C57563",   // clay — alerts / negative
+  violet: "#917FC0", // lavender — IOUs
+  track: "#DFEAEB", barIdle: "#C2D3D5",
+  glow: "rgba(79,154,147,.20)", accentFrom: "#4F9A93", accentTo: "#6FAE7C",
 };
+const DARK = {
+  bg: "#0D1417", panel: "#15201F", panel2: "#1A2A2A", line: "#27383A",
+  ink: "#E9F0F0", sub: "#9DB0B4", faint: "#5A6E72",
+  blue: "#6FC0B5",   // glowing teal
+  green: "#85CC93",  // mint
+  amber: "#E6B968",  // warm gold
+  rose: "#E29683",   // coral
+  violet: "#B6A6E0",
+  track: "#21322F", barIdle: "#2A3D3C",
+  glow: "rgba(111,192,181,.26)", accentFrom: "#6FC0B5", accentTo: "#85CC93",
+};
+const T = { ...LIGHT };
+const applyTheme = (name) => Object.assign(T, name === "dark" ? DARK : LIGHT);
 const SERIF = "'Iowan Old Style', 'Palatino Linotype', Palatino, Palladio, Georgia, 'Times New Roman', serif";
-const CAT_COLORS = ["#7FA6A3", "#93B0C4", "#9DB89A", "#C9A27E", "#A99BC0", "#84B0AE", "#D2BFA0", "#A8BD9E"];
-const BG = `radial-gradient(1100px 460px at 50% -240px, #FFFFFF, ${T.bg} 70%)`;
+const CAT_COLORS = ["#4F9A93", "#6E9FC4", "#6FAE7C", "#C8923F", "#917FC0", "#5FB0A6", "#CDA86A", "#8FBE8A"];
+const bg = () => `radial-gradient(1300px 560px at 50% -280px, ${T.panel}, ${T.bg} 70%)`;
+/* faint film-grain so flat areas have texture (works on light + dark) */
+const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E\")";
 
 const DEFAULTS = {
   // New accounts start with NO budget set (weekly 0) so the dashboard doesn't
@@ -207,9 +222,9 @@ const Card = ({ children, style, className = "", onClick }) => (
   <div className={`card ${className}`} onClick={onClick} style={{ background: T.panel, borderRadius: 22, border: `1px solid ${T.line}`, boxShadow: "0 1px 2px rgba(56,69,74,.03), 0 18px 40px -24px rgba(56,69,74,.18)", ...style }}>{children}</div>
 );
 const Field = ({ children }) => <div className="flex flex-col gap-1">{children}</div>;
-const inputStyle = { background: "#FFFFFF", border: `1px solid ${T.line}`, color: T.ink, borderRadius: 12, padding: "10px 12px", fontSize: 14, outline: "none", width: "100%" };
+const inputStyle = { background: "var(--inp-bg,#FFFFFF)", border: "1px solid var(--inp-bd,#D9E5E6)", color: "var(--inp-fg,#2C3A3F)", borderRadius: 12, padding: "10px 12px", fontSize: 14, outline: "none", width: "100%" };
 const btn = (bg, fg = "#FFFFFF") => ({ background: bg, color: fg, border: "none", borderRadius: 12, padding: "10px 16px", fontSize: 14, fontWeight: 600, letterSpacing: .2, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, boxShadow: "0 1px 2px rgba(56,69,74,.10)" });
-const ghost = { background: "transparent", color: T.sub, border: `1px solid ${T.line}`, borderRadius: 12, padding: "9px 12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 };
+const ghost = { background: "transparent", color: "var(--sub,#677880)", border: "1px solid var(--inp-bd,#D9E5E6)", borderRadius: 12, padding: "9px 12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 };
 const Wordmark = ({ size = 12.5 }) => <div style={{ fontSize: size, fontWeight: 800, letterSpacing: 0.6, color: T.blue }}>GO<span style={{ color: T.ink }}>expense</span></div>;
 
 function Progress({ value, max, color }) {
@@ -253,20 +268,28 @@ function Segmented({ options, value, onChange }) {
   );
 }
 
-const GlobalStyle = () => <style>{`*{box-sizing:border-box} input::placeholder{color:${T.faint}} .num{font-feature-settings:"tnum";font-variant-numeric:tabular-nums} .serif{font-family:${SERIF}} .card{transition:transform .18s ease, border-color .18s ease} .card:hover{transform:translateY(-2px); border-color:#CCD9DA} .ico-btn:hover{color:${T.ink}!important}
-  .goalcard{transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease}
-  .goalcard:hover{transform:translateY(-2px); box-shadow:0 14px 32px -20px rgba(56,69,74,.38)}
+const GlobalStyle = () => <style>{`:root{--inp-bg:${T.panel2};--inp-bd:${T.line};--inp-fg:${T.ink};--sub:${T.sub}}
+  *{box-sizing:border-box} input::placeholder{color:${T.faint}} input,select,textarea{color-scheme:${T.bg === DARK.bg ? "dark" : "light"}} body{transition:background .4s ease}
+  .num{font-feature-settings:"tnum";font-variant-numeric:tabular-nums} .serif{font-family:${SERIF}}
+  .card{transition:transform .22s ease, box-shadow .22s ease, border-color .22s ease}
+  .card:hover{transform:translateY(-3px); border-color:${T.blue}66; box-shadow:0 18px 40px -24px ${T.glow}, 0 0 0 1px ${T.blue}14}
+  .ico-btn:hover{color:${T.ink}!important}
+  .goalcard{transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease}
+  .goalcard:hover{transform:translateY(-3px); box-shadow:0 16px 34px -22px ${T.glow}}
   .gchip{transition:background .15s ease, color .15s ease, border-color .15s ease}
   .gchip:hover{background:${T.green}1f; border-color:${T.green}; color:${T.green}!important}
   .gbtn{transition:transform .12s ease, filter .12s ease}
-  .gbtn:hover{filter:brightness(1.04)} .gbtn:active{transform:scale(.93)}
+  .gbtn:hover{filter:brightness(1.06)} .gbtn:active{transform:scale(.93)}
   .goalbar{transition:width .6s cubic-bezier(.22,1,.36,1)}
   @keyframes fundedpop{0%{transform:scale(.5);opacity:0}55%{transform:scale(1.18)}100%{transform:scale(1);opacity:1}}
   .fundedpop{animation:fundedpop .42s ease both}
-  @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}`}</style>;
+  @keyframes riseIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  .rise>*{animation:riseIn .5s cubic-bezier(.22,1,.36,1) both}
+  .rise>*:nth-child(1){animation-delay:.02s} .rise>*:nth-child(2){animation-delay:.07s} .rise>*:nth-child(3){animation-delay:.12s} .rise>*:nth-child(4){animation-delay:.17s} .rise>*:nth-child(5){animation-delay:.22s} .rise>*:nth-child(6){animation-delay:.27s} .rise>*:nth-child(7){animation-delay:.32s}
+  @media (prefers-reduced-motion: reduce){ .rise>*{animation:none} .card,.goalcard{transition:none} }`}</style>;
 
 function Splash({ text = "settling in…" }) {
-  return <div style={{ background: BG, color: T.sub, minHeight: "100vh", display: "grid", placeItems: "center", fontFamily: SERIF, fontStyle: "italic", fontSize: 16, padding: 20, textAlign: "center" }}>{text}</div>;
+  return <div style={{ background: bg(), color: T.sub, minHeight: "100vh", display: "grid", placeItems: "center", fontFamily: SERIF, fontStyle: "italic", fontSize: 16, padding: 20, textAlign: "center" }}>{text}</div>;
 }
 
 /* ---------- auth ---------- */
@@ -302,7 +325,7 @@ function LoginScreen() {
   const swap = () => { setMode((m) => (m === "signup" ? "signin" : "signup")); setErr(""); setMsg(""); };
 
   return (
-    <div style={{ background: BG, minHeight: "100vh", display: "grid", placeItems: "center", padding: 20, fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
+    <div style={{ background: bg(), minHeight: "100vh", display: "grid", placeItems: "center", padding: 20, fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
       <GlobalStyle />
       <Card className="p-6" style={{ width: "min(400px, 100%)" }}>
         <div style={{ textAlign: "center", marginBottom: 20 }}>
@@ -328,6 +351,15 @@ function LoginScreen() {
 
 /* ---------- main ---------- */
 export default function GOexpense() {
+  const [theme, setTheme] = useState(() => { try { return localStorage.getItem("goexpense:theme") || "light"; } catch { return "light"; } });
+  applyTheme(theme);                                  // sync the live palette before anything renders
+  useEffect(() => {
+    try { localStorage.setItem("goexpense:theme", theme); } catch { /* ignore */ }
+    document.documentElement.style.background = T.bg;
+    document.documentElement.style.colorScheme = theme === "dark" ? "dark" : "light";
+  }, [theme]);
+  const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(!supabaseConfigured);
   const [loading, setLoading] = useState(true);
@@ -344,6 +376,8 @@ export default function GOexpense() {
   const [query, setQuery] = useState("");
   const [filterCat, setFilterCat] = useState("");
   const [trendMode, setTrendMode] = useState("weeks");
+  const [budgetMode, setBudgetMode] = useState(() => { try { return localStorage.getItem("goexpense:budgetMode") || "weekly"; } catch { return "weekly"; } });
+  const setMode = (m) => { setBudgetMode(m); try { localStorage.setItem("goexpense:budgetMode", m); } catch { /* ignore */ } };
   const [analytics, setAnalytics] = useState(null); // null | 'spent' | 'remaining' | 'bills' | 'owed'
   const [editingExpense, setEditingExpense] = useState(null);
   const [editingPayment, setEditingPayment] = useState(null);
@@ -455,6 +489,13 @@ export default function GOexpense() {
   const pace = budgets.weekly * elapsedFrac;
   const paceDelta = spent - pace;
   const noBudget = budgets.weekly === 0;
+
+  /* daily view: today's spend vs a daily allowance (weekly ÷ 7) */
+  const todayIso = fmt(today0());
+  const todaySpent = useMemo(() => expenses.filter((e) => e.date === todayIso).reduce((s, e) => s + e.amount, 0), [expenses, todayIso]);
+  const dailyBudget = budgets.weekly / 7;
+  const todayRemaining = dailyBudget - todaySpent;
+
   const paceLabel = noBudget ? "set a weekly budget"
     : isThisWeek
       ? (Math.abs(paceDelta) < 1 ? "on pace" : paceDelta > 0 ? `${money(paceDelta)} over pace` : `${money(-paceDelta)} under pace`)
@@ -622,7 +663,7 @@ export default function GOexpense() {
   if (loading) return <Splash text="loading…" />;
 
   return (
-    <div style={{ background: BG, color: T.ink, minHeight: "100vh", fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif", padding: "28px clamp(16px,4vw,40px)" }}>
+    <div style={{ background: `${GRAIN}, ${bg()}`, backgroundBlendMode: theme === "dark" ? "soft-light" : "multiply", color: T.ink, minHeight: "100vh", fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif", padding: "28px clamp(16px,4vw,40px)" }}>
       <GlobalStyle />
 
       {/* header */}
@@ -630,10 +671,11 @@ export default function GOexpense() {
         <div>
           <Wordmark />
           <div className="serif" style={{ fontSize: 15, color: T.sub, fontStyle: "italic" }}>{greeting}</div>
-          <h1 className="serif" style={{ fontSize: 36, fontWeight: 500, margin: "1px 0 0", letterSpacing: -0.4, color: T.ink }}>your week</h1>
+          <h1 className="serif" style={{ fontSize: 41, fontWeight: 600, margin: "2px 0 0", letterSpacing: -0.6, color: T.ink, background: `linear-gradient(120deg, ${T.ink}, ${T.blue})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>your week</h1>
         </div>
         <div className="flex items-center gap-3 flex-wrap" style={{ justifyContent: "flex-end" }}>
           <span className="serif" style={{ color: T.sub, fontSize: 14, fontStyle: "italic" }}>{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</span>
+          <button className="ico-btn" style={{ ...ghost, padding: "9px 11px" }} onClick={toggleTheme} title={theme === "dark" ? "switch to light" : "switch to dark"}>{theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}</button>
           <button style={ghost} onClick={() => exportPDF(expenses, budgets)} title="export a week-by-week PDF report"><Download size={15} /> export pdf</button>
           <button style={ghost} onClick={() => setShowSettings(true)}><Settings size={15} /> budget</button>
           {supabaseConfigured && <button style={ghost} onClick={signOut} title={session?.user?.email}><LogOut size={15} /> sign out</button>}
@@ -657,7 +699,10 @@ export default function GOexpense() {
       )}
 
       {/* top stat strip */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", marginBottom: 16 }}>
+      <div className="grid gap-3 rise" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", marginBottom: 16 }}>
+        <Stat icon={<CalendarDays size={16} />} label="today" value={money(todaySpent)}
+          sub={noBudget ? "set a budget for a daily target" : todayRemaining >= 0 ? `${money(todayRemaining)} left of ${money(dailyBudget)}` : `${money(-todayRemaining)} over your ${money(dailyBudget)}`}
+          tint={noBudget ? T.sub : todayRemaining < 0 ? T.rose : T.green} />
         <Stat icon={<Wallet size={16} />} label="spent this week" value={money(spent)} tint={T.blue} onClick={() => setAnalytics("spent")}
           sub={lastWeekSpent > 0
             ? <span style={{ color: wowDelta > 0 ? T.rose : T.green }}>{wowDelta > 0 ? "▲" : "▼"} {money(Math.abs(wowDelta))} vs last week</span>
@@ -667,7 +712,7 @@ export default function GOexpense() {
         <Stat icon={<Users size={16} />} label="net owed" value={money(owedToMe - iOwe)} sub={iOwe > 0 ? `you owe ${money(iOwe)}` : "no one owes you"} tint={owedToMe - iOwe >= 0 ? T.green : T.rose} onClick={() => setAnalytics("owed")} />
       </div>
 
-      <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))" }}>
+      <div className="grid gap-4 rise" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))" }}>
 
         {/* ---- weekly budget + analytics ---- */}
         <Card className="p-5" style={{ gridColumn: "1 / -1" }}>
@@ -897,7 +942,7 @@ export default function GOexpense() {
       {analytics && <AnalyticsModal kind={analytics} onClose={() => setAnalytics(null)}
         ctx={{ spent, remaining, budgets, noBudget, wkExpenses, byCat, weeklyTrend, payments, debts, iOwe, owedToMe, unpaidTotal, overdue }} />}
 
-      {showSettings && <BudgetSettings budgets={budgets} recurring={recurring}
+      {showSettings && <BudgetSettings budgets={budgets} recurring={recurring} mode={budgetMode} onModeChange={setMode}
         onDeleteRecurring={removeRecurring}
         onClearAll={() => { clearAll(); setShowSettings(false); }}
         onSave={saveBudget} onClose={() => setShowSettings(false)} />}
@@ -1077,7 +1122,7 @@ function GoalAdder({ onAdd }) {
   );
 }
 
-const gchipStyle = { background: "#FFFFFF", border: `1px solid ${T.line}`, color: T.sub, borderRadius: 99, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", lineHeight: 1 };
+const gchipStyle = { background: "var(--inp-bg,#FFFFFF)", border: "1px solid var(--inp-bd,#D9E5E6)", color: "var(--sub,#677880)", borderRadius: 99, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", lineHeight: 1 };
 
 function GoalRow({ goal, onAddMoney, onEdit, onDelete, onDelContribution }) {
   const [amt, setAmt] = useState("");
@@ -1416,10 +1461,14 @@ function AnalyticsModal({ kind, ctx, onClose }) {
   );
 }
 
-function BudgetSettings({ budgets, recurring, onDeleteRecurring, onClearAll, onSave, onClose }) {
+function BudgetSettings({ budgets, recurring, mode = "weekly", onModeChange, onDeleteRecurring, onClearAll, onSave, onClose }) {
   const [weekly, setWeekly] = useState(budgets.weekly);
   const [cats, setCats] = useState(() => budgets.categories.map((c) => ({ ...c, _k: crypto.randomUUID() })));
   const sumCats = cats.reduce((s, c) => s + (parseFloat(c.limit) || 0), 0);
+  const isDaily = mode === "daily";
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const shownBudget = isDaily ? round2(weekly / 7) : weekly;           // edit in daily or weekly terms
+  const onBudget = (v) => setWeekly(isDaily ? round2((v || 0) * 7) : (v || 0));
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(56,69,74,.28)", backdropFilter: "blur(3px)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }} onClick={onClose}>
       <Card className="p-6" style={{ width: "min(440px,100%)", maxHeight: "85vh", overflowY: "auto" }}>
@@ -1428,11 +1477,17 @@ function BudgetSettings({ budgets, recurring, onDeleteRecurring, onClearAll, onS
           <button style={{ background: "transparent", border: "none", color: T.sub, cursor: "pointer" }} onClick={onClose}><X size={18} /></button>
         </div>
         <div onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between gap-2" style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 13, color: T.sub }}>budget by</label>
+            <Segmented options={[{ value: "weekly", label: "week" }, { value: "daily", label: "day" }]} value={mode} onChange={onModeChange} />
+          </div>
           <Field>
-            <label style={{ fontSize: 13, color: T.sub }}>weekly budget</label>
-            <input style={inputStyle} type="number" value={weekly} onChange={(e) => setWeekly(parseFloat(e.target.value) || 0)} />
+            <label style={{ fontSize: 13, color: T.sub }}>{isDaily ? "daily budget" : "weekly budget"}</label>
+            <input style={inputStyle} type="number" value={shownBudget} onChange={(e) => onBudget(parseFloat(e.target.value))} />
           </Field>
-          <div style={{ fontSize: 12, color: T.sub, margin: "8px 0 12px" }}>category limits sum to {money(sumCats)}</div>
+          <div style={{ fontSize: 12, color: T.sub, margin: "6px 0 12px" }}>
+            {weekly > 0 ? <>that's {money(round2(weekly / 7))}/day · {money(weekly)}/week · {money(round2(weekly / 7 * 30))}/month. </> : ""}category limits sum to {money(sumCats)}
+          </div>
           <div className="flex flex-col gap-2">
             {cats.map((c, i) => (
               <div key={c._k} className="flex gap-2 items-center">
