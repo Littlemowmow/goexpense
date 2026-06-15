@@ -6,3 +6,8 @@ dist/
 
 # local secrets
 .env
+
+# local dev tooling (not part of the app)
+.agents/
+.mcp.json
+skills-lock.json

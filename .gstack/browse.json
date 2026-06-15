@@ -1,8 +1,8 @@
 {
-  "pid": 43453,
-  "port": 49724,
-  "token": "110b349f-17bd-4d95-a610-6c068aa4cda3",
-  "startedAt": "2026-06-14T22:50:36.370Z",
+  "pid": 57191,
+  "port": 41553,
+  "token": "27372bef-b36d-4687-bf26-9cea7b9db696",
+  "startedAt": "2026-06-15T01:39:36.680Z",
   "serverPath": "/Users/hadimuhammadali10/.claude/skills/gstack/browse/src/server.ts",
   "mode": "launched"
 }

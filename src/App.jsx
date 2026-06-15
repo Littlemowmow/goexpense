@@ -29,15 +29,18 @@ const CAT_COLORS = ["#7FA6A3", "#93B0C4", "#9DB89A", "#C9A27E", "#A99BC0", "#84B
 const BG = `radial-gradient(1100px 460px at 50% -240px, #FFFFFF, ${T.bg} 70%)`;
 
 const DEFAULTS = {
+  // New accounts start with NO budget set (weekly 0) so the dashboard doesn't
+  // show phantom "money left to spend" before the user sets their own budget.
+  // Category names are kept so the expense dropdown is usable; limits start at 0.
   budgets: {
-    weekly: 260,
+    weekly: 0,
     categories: [
-      { name: "Food", limit: 70 },
-      { name: "Groceries", limit: 55 },
-      { name: "Transport", limit: 30 },
-      { name: "Subscriptions", limit: 25 },
-      { name: "Fun", limit: 45 },
-      { name: "Other", limit: 35 },
+      { name: "Food", limit: 0 },
+      { name: "Groceries", limit: 0 },
+      { name: "Transport", limit: 0 },
+      { name: "Subscriptions", limit: 0 },
+      { name: "Fun", limit: 0 },
+      { name: "Other", limit: 0 },
     ],
   },
 };
@@ -330,12 +333,15 @@ export default function GOexpense() {
   const dayIdx = isThisWeek ? Math.min(6, (new Date().getDay() + 6) % 7) : 6;
   const pace = budgets.weekly * elapsedFrac;
   const paceDelta = spent - pace;
-  const paceLabel = isThisWeek
-    ? (Math.abs(paceDelta) < 1 ? "on pace" : paceDelta > 0 ? `${money(paceDelta)} over pace` : `${money(-paceDelta)} under pace`)
-    : (remaining >= 0 ? `finished ${money(remaining)} under` : `finished ${money(-remaining)} over`);
-  const paceColor = isThisWeek
-    ? (Math.abs(paceDelta) < 1 ? T.sub : paceDelta > 0 ? T.amber : T.green)
-    : (remaining >= 0 ? T.green : T.rose);
+  const noBudget = budgets.weekly === 0;
+  const paceLabel = noBudget ? "set a weekly budget"
+    : isThisWeek
+      ? (Math.abs(paceDelta) < 1 ? "on pace" : paceDelta > 0 ? `${money(paceDelta)} over pace` : `${money(-paceDelta)} under pace`)
+      : (remaining >= 0 ? `finished ${money(remaining)} under` : `finished ${money(-remaining)} over`);
+  const paceColor = noBudget ? T.amber
+    : isThisWeek
+      ? (Math.abs(paceDelta) < 1 ? T.sub : paceDelta > 0 ? T.amber : T.green)
+      : (remaining >= 0 ? T.green : T.rose);
 
   /* payments */
   const sortedPayments = useMemo(() => [...payments].sort((a, b) => (a.status === b.status ? a.dueDate.localeCompare(b.dueDate) : a.status === "unpaid" ? -1 : 1)), [payments]);
@@ -487,8 +493,8 @@ export default function GOexpense() {
         <Stat icon={<Wallet size={16} />} label="spent this week" value={money(spent)} tint={T.blue}
           sub={lastWeekSpent > 0
             ? <span style={{ color: wowDelta > 0 ? T.rose : T.green }}>{wowDelta > 0 ? "▲" : "▼"} {money(Math.abs(wowDelta))} vs last week</span>
-            : `of ${money(budgets.weekly)} budget`} />
-        <Stat icon={<Wallet size={16} />} label="remaining" value={money(remaining)} sub={remaining < 0 ? "over budget" : "left to spend"} tint={remaining < 0 ? T.rose : T.green} />
+            : noBudget ? "no budget set yet" : `of ${money(budgets.weekly)} budget`} />
+        <Stat icon={<Wallet size={16} />} label="remaining" value={noBudget ? "—" : money(remaining)} sub={noBudget ? "set one in ⚙ budget" : remaining < 0 ? "over budget" : "left to spend"} tint={noBudget ? T.sub : remaining < 0 ? T.rose : T.green} />
         <Stat icon={<CalendarClock size={16} />} label="unpaid bills" value={money(unpaidTotal)} sub={overdue.length ? `${overdue.length} overdue` : `${dueSoon.length} due within 7 days`} tint={overdue.length ? T.rose : T.amber} />
         <Stat icon={<Users size={16} />} label="net owed" value={money(owedToMe - iOwe)} sub={iOwe > 0 ? `you owe ${money(iOwe)}` : "no one owes you"} tint={owedToMe - iOwe >= 0 ? T.green : T.rose} />
       </div>
