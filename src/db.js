@@ -37,6 +37,7 @@ const localDb = {
   delPayment: async (id) => lset("payments", lget("payments", []).filter((p) => p.id !== id)),
 
   addDebt: async (d) => { const item = { id: uid(), person: d.person, amount: d.amount, note: d.note || "", direction: d.direction }; lset("debts", [...lget("debts", []), item]); return item; },
+  updateDebt: async (id, patch) => lset("debts", lget("debts", []).map((d) => d.id === id ? { ...d, ...patch } : d)),
   delDebt: async (id) => lset("debts", lget("debts", []).filter((d) => d.id !== id)),
 
   addRecurring: async (r) => { const item = { id: uid(), amount: r.amount, category: r.category, note: r.note || "", cadence: r.cadence, lastDate: r.lastDate }; lset("recurring", [...lget("recurring", []), item]); return item; },
@@ -95,9 +96,10 @@ const cloudDb = {
   updateExpense: (id, patch) => { const row = {}; if ("amount" in patch) row.amount = patch.amount; if ("category" in patch) row.category = patch.category; if ("note" in patch) row.note = patch.note; if ("date" in patch) row.spent_on = patch.date; return run(supabase.from("expenses").update(row).eq("id", id)); },
   delExpense: (id) => run(supabase.from("expenses").delete().eq("id", id)),
   addPayment: (p) => insertOne("payments", paymentRow(p), mapPayment),
-  updatePayment: (id, patch) => { const row = {}; if ("dueDate" in patch) row.due_date = patch.dueDate; if ("status" in patch) row.status = patch.status; return run(supabase.from("payments").update(row).eq("id", id)); },
+  updatePayment: (id, patch) => { const row = {}; if ("name" in patch) row.name = patch.name; if ("amount" in patch) row.amount = patch.amount; if ("dueDate" in patch) row.due_date = patch.dueDate; if ("recurring" in patch) row.recurring = patch.recurring; if ("status" in patch) row.status = patch.status; return run(supabase.from("payments").update(row).eq("id", id)); },
   delPayment: (id) => run(supabase.from("payments").delete().eq("id", id)),
   addDebt: (d) => insertOne("debts", debtRow(d), mapDebt),
+  updateDebt: (id, patch) => run(supabase.from("debts").update(patch).eq("id", id)),
   delDebt: (id) => run(supabase.from("debts").delete().eq("id", id)),
   addRecurring: (r) => insertOne("recurring_expenses", recurringRow(r), mapRecurring),
   delRecurring: (id) => run(supabase.from("recurring_expenses").delete().eq("id", id)),

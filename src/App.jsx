@@ -258,6 +258,8 @@ export default function GOexpense() {
   const [trendMode, setTrendMode] = useState("weeks");
   const [analytics, setAnalytics] = useState(null); // null | 'spent' | 'remaining' | 'bills' | 'owed'
   const [editingExpense, setEditingExpense] = useState(null);
+  const [editingPayment, setEditingPayment] = useState(null);
+  const [editingDebt, setEditingDebt] = useState(null);
 
   /* auth: current session + subscribe to changes */
   useEffect(() => {
@@ -430,6 +432,12 @@ export default function GOexpense() {
     setPayments((x) => x.filter((p) => p.id !== id));
     try { await db.delPayment(id); } catch (err) { if (item) setPayments((x) => [...x, item]); fail("delete payment")(err); }
   };
+  const editPayment = async (id, patch) => {
+    const prev = payments;
+    setPayments((x) => x.map((p) => p.id === id ? { ...p, ...patch } : p));
+    setEditingPayment(null);
+    try { await db.updatePayment(id, patch); } catch (err) { setPayments(prev); fail("edit payment")(err); }
+  };
   const togglePaid = async (p) => {
     const prev = payments;
     try {
@@ -449,6 +457,12 @@ export default function GOexpense() {
     const item = debts.find((d) => d.id === id);
     setDebts((x) => x.filter((d) => d.id !== id));
     try { await db.delDebt(id); } catch (err) { if (item) setDebts((x) => [...x, item]); fail("delete IOU")(err); }
+  };
+  const editDebt = async (id, patch) => {
+    const prev = debts;
+    setDebts((x) => x.map((d) => d.id === id ? { ...d, ...patch } : d));
+    setEditingDebt(null);
+    try { await db.updateDebt(id, patch); } catch (err) { setDebts(prev); fail("edit IOU")(err); }
   };
   const removeRecurring = async (id) => {
     const item = recurring.find((r) => r.id === id);
@@ -669,7 +683,7 @@ export default function GOexpense() {
               const od = p.status === "unpaid" && parse(p.dueDate) < today0();
               const soon = p.status === "unpaid" && !od && parse(p.dueDate) <= addDays(today0(), 7);
               return (
-                <Row key={p.id} onDelete={() => removePayment(p.id)}>
+                <Row key={p.id} onEdit={() => setEditingPayment(p)} onDelete={() => removePayment(p.id)}>
                   <div style={{ minWidth: 0, opacity: p.status === "paid" ? 0.45 : 1 }}>
                     <div className="flex items-center gap-2" style={{ fontSize: 14, fontWeight: 600 }}>
                       {od && <AlertTriangle size={13} color={T.rose} />}
@@ -704,7 +718,7 @@ export default function GOexpense() {
           <div style={{ marginTop: 14, maxHeight: 280, overflowY: "auto" }}>
             {debts.length === 0 && <Empty text="track who you owe and who owes you" />}
             {debts.map((d) => (
-              <Row key={d.id} onDelete={() => removeDebt(d.id)}>
+              <Row key={d.id} onEdit={() => setEditingDebt(d)} onDelete={() => removeDebt(d.id)}>
                 <div style={{ minWidth: 0 }}>
                   <div className="flex items-center gap-2" style={{ fontSize: 14, fontWeight: 600 }}>
                     {d.direction === "owe" ? <ArrowUpRight size={14} color={T.rose} /> : <ArrowDownRight size={14} color={T.green} />}
@@ -722,6 +736,10 @@ export default function GOexpense() {
 
       {editingExpense && <EditExpenseModal expense={editingExpense} categories={budgets.categories}
         onSave={(patch) => editExpense(editingExpense.id, patch)} onClose={() => setEditingExpense(null)} />}
+      {editingPayment && <EditPaymentModal payment={editingPayment}
+        onSave={(patch) => editPayment(editingPayment.id, patch)} onClose={() => setEditingPayment(null)} />}
+      {editingDebt && <EditDebtModal debt={editingDebt}
+        onSave={(patch) => editDebt(editingDebt.id, patch)} onClose={() => setEditingDebt(null)} />}
 
       {analytics && <AnalyticsModal kind={analytics} onClose={() => setAnalytics(null)}
         ctx={{ spent, remaining, budgets, noBudget, wkExpenses, byCat, weeklyTrend, payments, debts, iOwe, owedToMe, unpaidTotal, overdue }} />}
@@ -871,6 +889,59 @@ function EditExpenseModal({ expense, categories, onSave, onClose }) {
         <input style={{ ...inputStyle, gridColumn: "1 / -1" }} placeholder="note (optional)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
         <input style={{ ...inputStyle, gridColumn: "1 / -1" }} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         <button style={{ ...btn(T.blue), gridColumn: "1 / -1", justifyContent: "center" }} onClick={save}><Check size={15} /> save changes</button>
+      </div>
+    </Modal>
+  );
+}
+
+function EditPaymentModal({ payment, onSave, onClose }) {
+  const [name, setName] = useState(payment.name);
+  const [amount, setAmount] = useState(String(payment.amount));
+  const [dueDate, setDueDate] = useState(payment.dueDate);
+  const [recurring, setRecurring] = useState(payment.recurring);
+  const save = () => {
+    const a = parseFloat(amount);
+    if (!name.trim() || !a || a <= 0) return;
+    onSave({ name: name.trim(), amount: a, dueDate, recurring });
+  };
+  return (
+    <Modal title="edit payment" onClose={onClose}>
+      <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <input style={{ ...inputStyle, gridColumn: "1 / -1" }} placeholder="name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <input style={inputStyle} type="number" placeholder="amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <input style={inputStyle} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        <select style={{ ...inputStyle, gridColumn: "1 / -1" }} value={recurring} onChange={(e) => setRecurring(e.target.value)}>
+          <option value="monthly">monthly</option>
+          <option value="weekly">weekly</option>
+          <option value="once">one-time</option>
+        </select>
+        <button style={{ ...btn(T.amber, "#3A2E12"), gridColumn: "1 / -1", justifyContent: "center" }} onClick={save}><Check size={15} /> save changes</button>
+      </div>
+    </Modal>
+  );
+}
+
+function EditDebtModal({ debt, onSave, onClose }) {
+  const [person, setPerson] = useState(debt.person);
+  const [amount, setAmount] = useState(String(debt.amount));
+  const [note, setNote] = useState(debt.note || "");
+  const [direction, setDirection] = useState(debt.direction);
+  const save = () => {
+    const a = parseFloat(amount);
+    if (!person.trim() || !a || a <= 0) return;
+    onSave({ person: person.trim(), amount: a, note: note.trim(), direction });
+  };
+  return (
+    <Modal title="edit iou" onClose={onClose}>
+      <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="flex gap-2" style={{ gridColumn: "1 / -1" }}>
+          <button style={{ ...ghost, flex: 1, justifyContent: "center", borderColor: direction === "owe" ? T.rose : T.line, color: direction === "owe" ? T.rose : T.sub }} onClick={() => setDirection("owe")}>i owe</button>
+          <button style={{ ...ghost, flex: 1, justifyContent: "center", borderColor: direction === "owed" ? T.green : T.line, color: direction === "owed" ? T.green : T.sub }} onClick={() => setDirection("owed")}>owed to me</button>
+        </div>
+        <input style={inputStyle} placeholder="person" value={person} onChange={(e) => setPerson(e.target.value)} autoFocus />
+        <input style={inputStyle} type="number" placeholder="amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <input style={{ ...inputStyle, gridColumn: "1 / -1" }} placeholder="for what? (optional)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
+        <button style={{ ...btn(T.violet), gridColumn: "1 / -1", justifyContent: "center" }} onClick={save}><Check size={15} /> save changes</button>
       </div>
     </Modal>
   );
