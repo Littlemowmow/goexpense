@@ -671,7 +671,7 @@ export default function GOexpense() {
         <div>
           <Wordmark />
           <div className="serif" style={{ fontSize: 15, color: T.sub, fontStyle: "italic" }}>{greeting}</div>
-          <h1 className="serif" style={{ fontSize: 41, fontWeight: 600, margin: "2px 0 0", letterSpacing: -0.6, color: T.ink, background: `linear-gradient(120deg, ${T.ink}, ${T.blue})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>your week</h1>
+          <h1 className="serif" style={{ fontSize: 41, fontWeight: 600, margin: "2px 0 0", letterSpacing: -0.6, color: T.ink }}>your week</h1>
         </div>
         <div className="flex items-center gap-3 flex-wrap" style={{ justifyContent: "flex-end" }}>
           <span className="serif" style={{ color: T.sub, fontSize: 14, fontStyle: "italic" }}>{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</span>
