@@ -19,6 +19,7 @@ Built with React + Vite. Charts by Recharts.
 - **Recurring expenses** — mark something weekly/monthly and it auto-logs itself
 - **Payments due** — rent/subscriptions/one-offs, with overdue + due-soon flags; mark paid and recurring bills roll to the next cycle
 - **Debts & IOUs** — who you owe and who owes you, with a running net
+- **Edit anything** — every logged expense, payment, and IOU has an inline ✎ edit button (and delete), so you can fix a mistake without re-entering it
 - **Trends** — spending over the last 8 weeks or 6 months vs. your budget
 - **Tap-through analytics** — press any summary card at the top to open a detail view: spending breakdown by category, budget usage, debts, or upcoming bills
 - **Upcoming bills** — recurring bills projected 90 days forward, in date order, with overdue flags and a running total (open it from the "unpaid bills" card)
