@@ -53,7 +53,7 @@ anything. Follow these steps exactly, in order. Total time: about 5 minutes.
 
 **Or, if you have Git:**
 ```bash
-git clone <THIS-REPO-URL>
+git clone <https://github.com/Littlemowmow/goexpense>
 ```
 
 ### 4. Go into the app's folder in the terminal
