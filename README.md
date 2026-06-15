@@ -14,8 +14,10 @@ Built with React + Vite. Charts by Recharts.
 
 ## What it does
 
-- **Weekly budget** with a by-day bar chart, a by-category donut, and pace tracking
+- **Weekly *or* daily budget** — set your target by week or by day (they stay linked: daily = weekly ÷ 7), with a by-day bar chart, a by-category donut, pace tracking, and a "today" card showing what's left to spend today
 - **Expenses** — log amount, category, note, and date; search and filter them
+- **Smart categories** — type a note like "deodorant", "uber", or "coffee" and it auto-sorts the expense into a category (Hygiene, Transport, Food…). Fully offline — a built-in keyword dictionary plus learning from your own past picks; override anytime
+- **Light & dark mode** — a calm "coastal mist" theme with a one-tap toggle, remembered across sessions
 - **Recurring expenses** — mark something weekly/monthly and it auto-logs itself
 - **Payments due** — rent/subscriptions/one-offs, with overdue + due-soon flags; mark paid and recurring bills roll to the next cycle
 - **Debts & IOUs** — who you owe and who owes you, with a running net
