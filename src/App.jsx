@@ -6,7 +6,7 @@ import {
 import {
   Wallet, CalendarClock, Users, Plus, Trash2, Check, Settings,
   ChevronLeft, ChevronRight, AlertTriangle, ArrowDownRight, ArrowUpRight, X,
-  Repeat, Download, Search, TrendingUp, Sparkles, LogOut, Maximize2,
+  Repeat, Download, Search, TrendingUp, Sparkles, LogOut, Maximize2, Pencil,
 } from "lucide-react";
 import { exportPDF } from "./report";
 import { supabase, supabaseConfigured } from "./supabase";
@@ -257,6 +257,7 @@ export default function GOexpense() {
   const [filterCat, setFilterCat] = useState("");
   const [trendMode, setTrendMode] = useState("weeks");
   const [analytics, setAnalytics] = useState(null); // null | 'spent' | 'remaining' | 'bills' | 'owed'
+  const [editingExpense, setEditingExpense] = useState(null);
 
   /* auth: current session + subscribe to changes */
   useEffect(() => {
@@ -416,6 +417,12 @@ export default function GOexpense() {
     const item = expenses.find((e) => e.id === id);
     setExpenses((x) => x.filter((e) => e.id !== id));
     try { await db.delExpense(id); } catch (err) { if (item) setExpenses((x) => [item, ...x]); fail("delete expense")(err); }
+  };
+  const editExpense = async (id, patch) => {
+    const prev = expenses;
+    setExpenses((x) => x.map((e) => e.id === id ? { ...e, ...patch } : e));
+    setEditingExpense(null);
+    try { await db.updateExpense(id, patch); } catch (err) { setExpenses(prev); fail("edit expense")(err); }
   };
   const addPayment = async (p) => { try { const row = await db.addPayment(p); setPayments((x) => [...x, row]); } catch (err) { fail("add payment")(err); } };
   const removePayment = async (id) => {
@@ -637,7 +644,7 @@ export default function GOexpense() {
             {wkExpenses.length === 0 && <Empty text="nothing logged this week yet" />}
             {wkExpenses.length > 0 && shownExpenses.length === 0 && <Empty text="no matches" />}
             {shownExpenses.map((e) => (
-              <Row key={e.id} onDelete={() => removeExpense(e.id)} onRepeat={() => repeatExpense(e)}>
+              <Row key={e.id} onEdit={() => setEditingExpense(e)} onDelete={() => removeExpense(e.id)} onRepeat={() => repeatExpense(e)}>
                 <div style={{ minWidth: 0 }}>
                   <div className="flex items-center gap-2" style={{ fontSize: 14 }}>
                     <span style={{ width: 7, height: 7, borderRadius: 9, background: CAT_COLORS[budgets.categories.findIndex((c) => c.name === e.category) % CAT_COLORS.length] || T.sub, flexShrink: 0 }} />
@@ -713,6 +720,9 @@ export default function GOexpense() {
       </div>
       </div>
 
+      {editingExpense && <EditExpenseModal expense={editingExpense} categories={budgets.categories}
+        onSave={(patch) => editExpense(editingExpense.id, patch)} onClose={() => setEditingExpense(null)} />}
+
       {analytics && <AnalyticsModal kind={analytics} onClose={() => setAnalytics(null)}
         ctx={{ spent, remaining, budgets, noBudget, wkExpenses, byCat, weeklyTrend, payments, debts, iOwe, owedToMe, unpaidTotal, overdue }} />}
 
@@ -745,13 +755,15 @@ function Mini({ label, value, tint }) {
     <div className="num" style={{ fontSize: 15, fontWeight: 600, color: tint }}>{value}</div>
   </div>;
 }
-function Row({ children, onDelete, onRepeat }) {
+function Row({ children, onDelete, onRepeat, onEdit }) {
+  const iconBtn = { background: "transparent", border: "none", color: T.faint, cursor: "pointer", padding: 4 };
   return (
     <div className="flex items-center justify-between gap-3 group" style={{ padding: "11px 2px", borderBottom: `1px solid ${T.line}` }}>
       <div className="flex items-center justify-between gap-3" style={{ flex: 1, minWidth: 0 }}>{children}</div>
       <div className="flex items-center gap-1">
-        {onRepeat && <button onClick={onRepeat} title="log again today" style={{ background: "transparent", border: "none", color: T.faint, cursor: "pointer", padding: 4 }}><Repeat size={14} /></button>}
-        <button onClick={onDelete} title="remove" style={{ background: "transparent", border: "none", color: T.faint, cursor: "pointer", padding: 4 }}><Trash2 size={14} /></button>
+        {onEdit && <button onClick={onEdit} title="edit" style={iconBtn}><Pencil size={13} /></button>}
+        {onRepeat && <button onClick={onRepeat} title="log again today" style={iconBtn}><Repeat size={14} /></button>}
+        <button onClick={onDelete} title="remove" style={iconBtn}><Trash2 size={14} /></button>
       </div>
     </div>
   );
@@ -834,6 +846,33 @@ function DebtAdder({ onAdd }) {
       <input style={{ ...inputStyle, gridColumn: "1 / -1" }} placeholder="for what? (optional)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
       <button style={{ ...btn(T.violet), gridColumn: "1 / -1", justifyContent: "center" }} onClick={add}><Plus size={15} /> add iou</button>
     </div>
+  );
+}
+
+function EditExpenseModal({ expense, categories, onSave, onClose }) {
+  const [amount, setAmount] = useState(String(expense.amount));
+  const known = categories.some((c) => c.name === expense.category);
+  const [category, setCategory] = useState(expense.category);
+  const [note, setNote] = useState(expense.note || "");
+  const [date, setDate] = useState(expense.date);
+  const save = () => {
+    const a = parseFloat(amount);
+    if (!a || a <= 0) return;
+    onSave({ amount: a, category, note: note.trim(), date });
+  };
+  return (
+    <Modal title="edit expense" onClose={onClose}>
+      <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <input style={inputStyle} type="number" placeholder="amount" value={amount} onChange={(e) => setAmount(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} autoFocus />
+        <select style={inputStyle} value={category} onChange={(e) => setCategory(e.target.value)}>
+          {!known && <option value={expense.category}>{expense.category}</option>}
+          {categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+        <input style={{ ...inputStyle, gridColumn: "1 / -1" }} placeholder="note (optional)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
+        <input style={{ ...inputStyle, gridColumn: "1 / -1" }} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <button style={{ ...btn(T.blue), gridColumn: "1 / -1", justifyContent: "center" }} onClick={save}><Check size={15} /> save changes</button>
+      </div>
+    </Modal>
   );
 }
 

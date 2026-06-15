@@ -29,6 +29,7 @@ async function localFetchAll() {
 const localDb = {
   addExpense: async (e) => { const item = { id: uid(), amount: e.amount, category: e.category, note: e.note || "", date: e.date, recurringId: e.recurringId || undefined }; lset("expenses", [item, ...lget("expenses", [])]); return item; },
   addExpensesBatch: async (arr) => { const items = arr.map((e) => ({ id: uid(), amount: e.amount, category: e.category, note: e.note || "", date: e.date, recurringId: e.recurringId || undefined })); lset("expenses", [...items, ...lget("expenses", [])]); return items; },
+  updateExpense: async (id, patch) => lset("expenses", lget("expenses", []).map((e) => e.id === id ? { ...e, ...patch } : e)),
   delExpense: async (id) => lset("expenses", lget("expenses", []).filter((e) => e.id !== id)),
 
   addPayment: async (p) => { const item = { id: uid(), name: p.name, amount: p.amount, dueDate: p.dueDate, recurring: p.recurring, status: p.status }; lset("payments", [...lget("payments", []), item]); return item; },
@@ -91,6 +92,7 @@ async function run(query) { const { error } = await query; if (error) throw erro
 const cloudDb = {
   addExpense: (e) => insertOne("expenses", expenseRow(e), mapExpense),
   addExpensesBatch: async (arr) => { if (!arr.length) return []; const { data, error } = await supabase.from("expenses").insert(arr.map(expenseRow)).select(); if (error) throw error; return (data || []).map(mapExpense); },
+  updateExpense: (id, patch) => { const row = {}; if ("amount" in patch) row.amount = patch.amount; if ("category" in patch) row.category = patch.category; if ("note" in patch) row.note = patch.note; if ("date" in patch) row.spent_on = patch.date; return run(supabase.from("expenses").update(row).eq("id", id)); },
   delExpense: (id) => run(supabase.from("expenses").delete().eq("id", id)),
   addPayment: (p) => insertOne("payments", paymentRow(p), mapPayment),
   updatePayment: (id, patch) => { const row = {}; if ("dueDate" in patch) row.due_date = patch.dueDate; if ("status" in patch) row.status = patch.status; return run(supabase.from("payments").update(row).eq("id", id)); },
