@@ -11,3 +11,7 @@ dist/
 .agents/
 .mcp.json
 skills-lock.json
+
+# private cloud setup (kept local, not in the public repo)
+supabase/
+.env.example

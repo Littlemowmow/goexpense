@@ -272,7 +272,7 @@ export default function GOexpense() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!userId) { setLoading(false); return; }
+      if (supabaseConfigured && !userId) { setLoading(false); return; }
       setLoading(true); setDataError("");
       try {
         let d = await fetchAll();
@@ -429,7 +429,7 @@ export default function GOexpense() {
       if (p.status === "unpaid" && p.recurring && p.recurring !== "once") {
         const nd = fmt(nextPeriod(parse(p.dueDate), p.recurring === "weekly" ? "weekly" : "monthly"));
         setPayments((x) => x.map((y) => y.id === p.id ? { ...y, dueDate: nd } : y));
-        await db.updatePayment(p.id, { due_date: nd });
+        await db.updatePayment(p.id, { dueDate: nd });
       } else {
         const ns = p.status === "paid" ? "unpaid" : "paid";
         setPayments((x) => x.map((y) => y.id === p.id ? { ...y, status: ns } : y));
@@ -472,10 +472,9 @@ export default function GOexpense() {
   const greeting = hour < 12 ? "good morning" : hour < 18 ? "good afternoon" : "good evening";
 
   /* ---------- gates ---------- */
-  if (!supabaseConfigured) return <Splash text="Supabase isn't configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env, then restart." />;
-  if (!authReady) return <Splash />;
-  if (!session) return <LoginScreen />;
-  if (loading) return <Splash text="loading your data…" />;
+  if (supabaseConfigured && !authReady) return <Splash />;
+  if (supabaseConfigured && !session) return <LoginScreen />;
+  if (loading) return <Splash text="loading…" />;
 
   return (
     <div style={{ background: BG, color: T.ink, minHeight: "100vh", fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif", padding: "28px clamp(16px,4vw,40px)" }}>
@@ -492,7 +491,7 @@ export default function GOexpense() {
           <span className="serif" style={{ color: T.sub, fontSize: 14, fontStyle: "italic" }}>{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</span>
           <button style={ghost} onClick={() => exportPDF(expenses, budgets)} title="export a week-by-week PDF report"><Download size={15} /> export pdf</button>
           <button style={ghost} onClick={() => setShowSettings(true)}><Settings size={15} /> budget</button>
-          <button style={ghost} onClick={signOut} title={session.user.email}><LogOut size={15} /> sign out</button>
+          {supabaseConfigured && <button style={ghost} onClick={signOut} title={session?.user?.email}><LogOut size={15} /> sign out</button>}
         </div>
       </div>
 
