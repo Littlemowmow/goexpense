@@ -19,8 +19,12 @@ Built with React + Vite + Supabase. Charts by Recharts.
 - **Payments due** — rent/subscriptions/one-offs, with overdue + due-soon flags; mark paid and recurring bills roll to the next cycle
 - **Debts & IOUs** — who you owe and who owes you, with a running net
 - **Trends** — spending over the last 8 weeks or 6 months vs. your budget
+- **Tap-through analytics** — press any summary card at the top to open a detail view: spending breakdown by category, budget usage, debts, or upcoming bills
+- **Upcoming bills** — recurring bills projected 90 days forward, in date order, with overdue flags and a running total (open it from the "unpaid bills" card)
 - **PDF export** — a tidy week-by-week report with charts (see `docs/report.png`)
-- **Accounts** — email + password login; your data is private to you
+- **Accounts** — email + password login; your data is private to you (enforced by the database, not just the app)
+
+![Upcoming bills analytics](docs/upcoming-bills.png)
 
 ---
 
