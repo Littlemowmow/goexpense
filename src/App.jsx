@@ -41,6 +41,9 @@ const DEFAULTS = {
       { name: "Transport", limit: 0 },
       { name: "Subscriptions", limit: 0 },
       { name: "Fun", limit: 0 },
+      { name: "Hygiene", limit: 0 },
+      { name: "Health", limit: 0 },
+      { name: "Shopping", limit: 0 },
       { name: "Other", limit: 0 },
     ],
   },
@@ -56,6 +59,73 @@ const sameWeek = (iso, start) => { const d = parse(iso); return d >= start && d 
 const money = (n) => (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const today0 = () => { const x = new Date(); x.setHours(0, 0, 0, 0); return x; };
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/* ---------- smart categories: guess a category from the note ----------
+   Fully local — a built-in keyword dictionary plus learning from the
+   categories you've picked before. Nothing leaves the browser. */
+const SMART_CATS = ["Hygiene", "Health", "Shopping"];   // added on top of the originals
+const CAT_KEYWORDS = {
+  Food: ["coffee", "cafe", "lunch", "dinner", "breakfast", "brunch", "restaurant", "pizza", "burger", "sushi", "taco", "ramen", "chipotle", "mcdonald", "starbucks", "dunkin", "kfc", "snack", "snacks", "takeout", "doordash", "ubereats", "grubhub", "food", "meal", "lunchbox"],
+  Groceries: ["grocery", "groceries", "supermarket", "walmart", "costco", "aldi", "trader", "safeway", "kroger", "wholefoods", "milk", "eggs", "bread", "produce", "vegetables", "fruit", "pantry"],
+  Transport: ["uber", "lyft", "gas", "fuel", "gasoline", "petrol", "metro", "bus", "train", "subway", "parking", "taxi", "cab", "flight", "airfare", "toll", "transit", "fare"],
+  Subscriptions: ["netflix", "spotify", "hulu", "disney", "prime", "icloud", "youtube", "hbo", "adobe", "chatgpt", "openai", "subscription", "patreon", "notion", "dropbox", "canva"],
+  Fun: ["movie", "movies", "cinema", "concert", "game", "games", "arcade", "bar", "club", "pub", "drinks", "entertainment", "museum", "ticket", "tickets", "party", "steam", "playstation", "xbox", "nintendo", "bowling", "festival"],
+  Hygiene: ["deodorant", "toothpaste", "toothbrush", "shampoo", "conditioner", "soap", "bodywash", "razor", "razors", "shaving", "shave", "floss", "mouthwash", "tampon", "tampons", "pad", "pads", "lotion", "sunscreen", "wipe", "wipes", "sanitizer", "hygiene", "skincare", "moisturizer", "perfume", "cologne"],
+  Health: ["pharmacy", "drugstore", "doctor", "medicine", "medication", "prescription", "dentist", "clinic", "hospital", "vitamin", "vitamins", "supplement", "supplements", "advil", "tylenol", "ibuprofen", "therapy", "gym", "copay", "bandage", "contacts", "glasses"],
+  Shopping: ["clothes", "clothing", "shoe", "shoes", "sneaker", "sneakers", "shirt", "pants", "jeans", "jacket", "dress", "amazon", "target", "mall", "electronics", "headphone", "headphones", "charger", "cable", "gift", "makeup", "book", "books", "stationery"],
+};
+const CAT_FALLBACKS = { Hygiene: ["Groceries", "Other"], Health: ["Groceries", "Other"], Shopping: ["Other"], Subscriptions: ["Other"], Fun: ["Other"], Transport: ["Other"], Food: ["Other"], Groceries: ["Other"] };
+
+const tokenize = (s) => (s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+function resolveCategory(concept, categories) {
+  const find = (name) => categories.find((c) => c.name.toLowerCase() === name.toLowerCase());
+  const hit = find(concept);
+  if (hit) return hit.name;
+  for (const fb of CAT_FALLBACKS[concept] || []) { const h = find(fb); if (h) return h.name; }
+  return null;
+}
+
+/* dictionary match: first keyword hit wins, plural-tolerant, whole-word only */
+function dictCategory(note, categories) {
+  const text = (note || "").toLowerCase().trim();
+  if (!text) return null;
+  const tokens = tokenize(text);
+  const has = (kw) => kw.includes(" ")
+    ? text.includes(kw)
+    : tokens.some((t) => t === kw || t === kw + "s" || (t.endsWith("s") && t.slice(0, -1) === kw));
+  for (const [cat, kws] of Object.entries(CAT_KEYWORDS)) {
+    if (kws.some(has)) { const r = resolveCategory(cat, categories); if (r) return r; }
+  }
+  return null;
+}
+
+/* learn from history: which category did past notes sharing a word land in? */
+function learnedCategory(note, expenses, categories) {
+  const tokens = new Set(tokenize(note).filter((t) => t.length >= 3));
+  if (!tokens.size || !expenses || !expenses.length) return null;
+  const score = {};
+  for (const e of expenses) {
+    if (!e.note) continue;
+    const overlap = tokenize(e.note).filter((t) => tokens.has(t)).length;
+    if (overlap) score[e.category] = (score[e.category] || 0) + overlap;
+  }
+  const best = Object.entries(score).sort((a, b) => b[1] - a[1])[0];
+  return best && categories.some((c) => c.name === best[0]) ? best[0] : null;
+}
+
+/* your own history wins over the built-in dictionary */
+const guessCategory = (note, categories, expenses) =>
+  learnedCategory(note, expenses, categories) || dictCategory(note, categories);
+
+/* ensure the smart categories exist for returning users (limits start at 0) */
+function withSmartCategories(cats) {
+  const names = new Set(cats.map((c) => c.name.toLowerCase()));
+  const missing = SMART_CATS.filter((n) => !names.has(n.toLowerCase())).map((n) => ({ name: n, limit: 0 }));
+  if (!missing.length) return cats;
+  const otherIdx = cats.findIndex((c) => c.name.toLowerCase() === "other");
+  return otherIdx === -1 ? [...cats, ...missing] : [...cats.slice(0, otherIdx), ...missing, ...cats.slice(otherIdx)];
+}
 
 /* ---------- recurring: materialise periods that have come due ---------- */
 function materializeRecurring(templates) {
@@ -310,6 +380,11 @@ export default function GOexpense() {
             d = await fetchAll();
             nextBudgets = d.budgets || nextBudgets;
           }
+        }
+        const mergedCats = withSmartCategories(nextBudgets.categories);
+        if (mergedCats.length !== nextBudgets.categories.length) {
+          nextBudgets = { ...nextBudgets, categories: mergedCats };
+          try { await db.upsertBudget(nextBudgets, userId); } catch { /* non-fatal: still usable this session */ }
         }
         if (cancelled) return;
         setExpenses(d.expenses); setPayments(d.payments); setDebts(d.debts); setRecurring(d.recurring); setGoals(d.goals || []); setBudgets(nextBudgets);
@@ -690,7 +765,7 @@ export default function GOexpense() {
         {/* ---- expenses ---- */}
         <Card className="p-5">
           <SectionTitle icon={<Wallet size={16} />} title="expenses" />
-          <ExpenseAdder categories={budgets.categories} onAdd={addExpense} />
+          <ExpenseAdder categories={budgets.categories} expenses={expenses} onAdd={addExpense} />
 
           <div className="flex gap-2" style={{ marginTop: 12 }}>
             <div style={{ position: "relative", flex: 1 }}>
@@ -865,26 +940,43 @@ function Row({ children, onDelete, onRepeat, onEdit }) {
   );
 }
 
-function ExpenseAdder({ categories, onAdd }) {
+function ExpenseAdder({ categories, expenses, onAdd }) {
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState(categories[0]?.name || "Other");
   const [note, setNote] = useState("");
   const [date, setDate] = useState(fmt(new Date()));
   const [cadence, setCadence] = useState("once");
+  const [touched, setTouched] = useState(false);   // did the user pick a category by hand?
+
+  // the smart matcher's pick for the current note (used for the hint)
+  const guess = touched ? null : guessCategory(note, categories, expenses);
+  const autoApplied = !touched && !!guess && !!note.trim();
+
+  // re-categorise as the note changes, until the user overrides the dropdown
+  const onNote = (v) => {
+    setNote(v);
+    if (!touched) setCategory(guessCategory(v, categories, expenses) || categories[0]?.name || "Other");
+  };
+
   const add = () => {
     const a = parseFloat(amount);
     if (!a || a <= 0) return;
     onAdd({ amount: a, category, note: note.trim(), date }, cadence);
-    setAmount(""); setNote(""); setCadence("once");
+    setAmount(""); setNote(""); setCadence("once"); setTouched(false); setCategory(categories[0]?.name || "Other");
   };
   return (
     <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
       <input style={inputStyle} type="number" placeholder="amount" value={amount} onChange={(e) => setAmount(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
-      <select style={inputStyle} value={category} onChange={(e) => setCategory(e.target.value)}>
+      <select style={{ ...inputStyle, borderColor: autoApplied ? T.blue : T.line }} value={category} onChange={(e) => { setCategory(e.target.value); setTouched(true); }}>
         {categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
       </select>
-      <input style={inputStyle} placeholder="note (optional)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
+      <input style={inputStyle} placeholder="note — e.g. deodorant, uber, coffee" value={note} onChange={(e) => onNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
       <input style={inputStyle} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      {autoApplied && (
+        <div className="flex items-center gap-1.5" style={{ gridColumn: "1 / -1", fontSize: 11.5, color: T.blue, marginTop: -2 }}>
+          <Sparkles size={12} /> sorted into <b style={{ fontWeight: 600 }}>{category}</b> for you — change it above anytime
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2" style={{ gridColumn: "1 / -1" }}>
         <Segmented options={[{ value: "once", label: "once" }, { value: "weekly", label: "weekly" }, { value: "monthly", label: "monthly" }]} value={cadence} onChange={setCadence} />
         {cadence !== "once" && <span style={{ fontSize: 11.5, color: T.faint }}>auto-logs each {cadence.replace("ly", "")}</span>}
