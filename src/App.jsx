@@ -6,7 +6,7 @@ import {
 import {
   Wallet, CalendarClock, Users, Plus, Trash2, Check, Settings,
   ChevronLeft, ChevronRight, AlertTriangle, ArrowDownRight, ArrowUpRight, X,
-  Repeat, Download, Search, TrendingUp, Sparkles, LogOut,
+  Repeat, Download, Search, TrendingUp, Sparkles, LogOut, Maximize2,
 } from "lucide-react";
 import { exportPDF } from "./report";
 import { supabase, supabaseConfigured } from "./supabase";
@@ -102,9 +102,32 @@ function buildSample() {
   };
 }
 
+/* ---------- upcoming bills: project unpaid + recurring payments forward ---------- */
+function projectUpcomingBills(payments, horizonDays = 90) {
+  const today = today0();
+  const end = addDays(today, horizonDays);
+  const out = [];
+  payments.forEach((p) => {
+    const isRecurring = p.recurring && p.recurring !== "once";
+    if (!isRecurring) {
+      if (p.status === "paid") return; // paid one-offs are done
+      out.push({ id: `${p.id}-0`, name: p.name, amount: p.amount, date: p.dueDate, recurring: false, overdue: parse(p.dueDate) < today });
+      return;
+    }
+    let d = parse(p.dueDate);
+    let guard = 0;
+    while (d <= end && guard < 300) {
+      out.push({ id: `${p.id}-${guard}`, name: p.name, amount: p.amount, date: fmt(d), recurring: p.recurring, overdue: d < today });
+      d = nextPeriod(d, p.recurring === "weekly" ? "weekly" : "monthly");
+      guard++;
+    }
+  });
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
 /* ---------- small ui ---------- */
-const Card = ({ children, style, className = "" }) => (
-  <div className={`card ${className}`} style={{ background: T.panel, borderRadius: 22, border: `1px solid ${T.line}`, boxShadow: "0 1px 2px rgba(56,69,74,.03), 0 18px 40px -24px rgba(56,69,74,.18)", ...style }}>{children}</div>
+const Card = ({ children, style, className = "", onClick }) => (
+  <div className={`card ${className}`} onClick={onClick} style={{ background: T.panel, borderRadius: 22, border: `1px solid ${T.line}`, boxShadow: "0 1px 2px rgba(56,69,74,.03), 0 18px 40px -24px rgba(56,69,74,.18)", ...style }}>{children}</div>
 );
 const Field = ({ children }) => <div className="flex flex-col gap-1">{children}</div>;
 const inputStyle = { background: "#FFFFFF", border: `1px solid ${T.line}`, color: T.ink, borderRadius: 12, padding: "10px 12px", fontSize: 14, outline: "none", width: "100%" };
@@ -233,6 +256,7 @@ export default function GOexpense() {
   const [query, setQuery] = useState("");
   const [filterCat, setFilterCat] = useState("");
   const [trendMode, setTrendMode] = useState("weeks");
+  const [analytics, setAnalytics] = useState(null); // null | 'spent' | 'remaining' | 'bills' | 'owed'
 
   /* auth: current session + subscribe to changes */
   useEffect(() => {
@@ -490,13 +514,13 @@ export default function GOexpense() {
 
       {/* top stat strip */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", marginBottom: 16 }}>
-        <Stat icon={<Wallet size={16} />} label="spent this week" value={money(spent)} tint={T.blue}
+        <Stat icon={<Wallet size={16} />} label="spent this week" value={money(spent)} tint={T.blue} onClick={() => setAnalytics("spent")}
           sub={lastWeekSpent > 0
             ? <span style={{ color: wowDelta > 0 ? T.rose : T.green }}>{wowDelta > 0 ? "▲" : "▼"} {money(Math.abs(wowDelta))} vs last week</span>
             : noBudget ? "no budget set yet" : `of ${money(budgets.weekly)} budget`} />
-        <Stat icon={<Wallet size={16} />} label="remaining" value={noBudget ? "—" : money(remaining)} sub={noBudget ? "set one in ⚙ budget" : remaining < 0 ? "over budget" : "left to spend"} tint={noBudget ? T.sub : remaining < 0 ? T.rose : T.green} />
-        <Stat icon={<CalendarClock size={16} />} label="unpaid bills" value={money(unpaidTotal)} sub={overdue.length ? `${overdue.length} overdue` : `${dueSoon.length} due within 7 days`} tint={overdue.length ? T.rose : T.amber} />
-        <Stat icon={<Users size={16} />} label="net owed" value={money(owedToMe - iOwe)} sub={iOwe > 0 ? `you owe ${money(iOwe)}` : "no one owes you"} tint={owedToMe - iOwe >= 0 ? T.green : T.rose} />
+        <Stat icon={<Wallet size={16} />} label="remaining" value={noBudget ? "—" : money(remaining)} sub={noBudget ? "set one in ⚙ budget" : remaining < 0 ? "over budget" : "left to spend"} tint={noBudget ? T.sub : remaining < 0 ? T.rose : T.green} onClick={() => setAnalytics("remaining")} />
+        <Stat icon={<CalendarClock size={16} />} label="unpaid bills" value={money(unpaidTotal)} sub={overdue.length ? `${overdue.length} overdue` : `${dueSoon.length} due within 7 days`} tint={overdue.length ? T.rose : T.amber} onClick={() => setAnalytics("bills")} />
+        <Stat icon={<Users size={16} />} label="net owed" value={money(owedToMe - iOwe)} sub={iOwe > 0 ? `you owe ${money(iOwe)}` : "no one owes you"} tint={owedToMe - iOwe >= 0 ? T.green : T.rose} onClick={() => setAnalytics("owed")} />
       </div>
 
       <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))" }}>
@@ -690,6 +714,9 @@ export default function GOexpense() {
       </div>
       </div>
 
+      {analytics && <AnalyticsModal kind={analytics} onClose={() => setAnalytics(null)}
+        ctx={{ spent, remaining, budgets, noBudget, wkExpenses, byCat, weeklyTrend, payments, debts, iOwe, owedToMe, unpaidTotal, overdue }} />}
+
       {showSettings && <BudgetSettings budgets={budgets} recurring={recurring}
         onDeleteRecurring={removeRecurring}
         onClearAll={() => { clearAll(); setShowSettings(false); }}
@@ -699,9 +726,10 @@ export default function GOexpense() {
 }
 
 /* ---------- subcomponents ---------- */
-function Stat({ icon, label, value, sub, tint }) {
+function Stat({ icon, label, value, sub, tint, onClick }) {
   return (
-    <Card className="p-5" style={{ borderTop: `2.5px solid ${tint}` }}>
+    <Card className="p-5" onClick={onClick} style={{ borderTop: `2.5px solid ${tint}`, cursor: onClick ? "pointer" : "default", position: "relative" }}>
+      {onClick && <Maximize2 size={12} color={T.faint} style={{ position: "absolute", top: 13, right: 13 }} />}
       <div className="flex items-center gap-2" style={{ color: tint, fontSize: 12.5, fontWeight: 500 }}>{icon}{label}</div>
       <div className="num" style={{ fontSize: 25, fontWeight: 600, margin: "8px 0 3px", color: T.ink }}>{value}</div>
       <div style={{ fontSize: 12, color: T.sub }}>{sub}</div>
@@ -807,6 +835,157 @@ function DebtAdder({ onAdd }) {
       <input style={{ ...inputStyle, gridColumn: "1 / -1" }} placeholder="for what? (optional)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
       <button style={{ ...btn(T.violet), gridColumn: "1 / -1", justifyContent: "center" }} onClick={add}><Plus size={15} /> add iou</button>
     </div>
+  );
+}
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(56,69,74,.28)", backdropFilter: "blur(3px)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }} onClick={onClose}>
+      <Card className="p-6" style={{ width: "min(560px,100%)", maxHeight: "86vh", overflowY: "auto" }}>
+        <div onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
+            <div className="serif" style={{ fontWeight: 500, fontSize: 20 }}>{title}</div>
+            <button style={{ background: "transparent", border: "none", color: T.sub, cursor: "pointer" }} onClick={onClose}><X size={18} /></button>
+          </div>
+          {children}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function AnalyticsModal({ kind, ctx, onClose }) {
+  const { spent, remaining, budgets, noBudget, wkExpenses, byCat, weeklyTrend, payments, debts, iOwe, owedToMe, unpaidTotal, overdue } = ctx;
+  const subhead = { fontSize: 12.5, color: T.sub, margin: "16px 0 8px", fontWeight: 500 };
+  const rowS = { fontSize: 13, padding: "7px 0", borderBottom: `1px solid ${T.line}` };
+
+  if (kind === "spent") {
+    const top = [...wkExpenses].sort((a, b) => b.amount - a.amount).slice(0, 6);
+    const cats = byCat.filter((c) => c.value > 0).sort((a, b) => b.value - a.value);
+    return (
+      <Modal title="spending analytics" onClose={onClose}>
+        <div className="flex items-baseline gap-2" style={{ marginBottom: 14 }}>
+          <span className="num" style={{ fontSize: 30, fontWeight: 600 }}>{money(spent)}</span>
+          <span style={{ color: T.sub, fontSize: 13 }}>this week{!noBudget && ` · ${money(Math.abs(remaining))} ${remaining < 0 ? "over" : "left"}`}</span>
+        </div>
+        <div style={{ ...subhead, marginTop: 0 }}>last 8 weeks</div>
+        <Chart height={150}>{(w) => (
+          <BarChart width={w} height={150} data={weeklyTrend} margin={{ top: 4, right: 0, bottom: 0, left: -22 }}>
+            <XAxis dataKey="label" tick={{ fill: T.sub, fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: T.sub, fontSize: 10 }} axisLine={false} tickLine={false} />
+            <Tooltip formatter={(v) => [money(v), "spent"]} contentStyle={{ borderRadius: 12, fontSize: 13, border: `1px solid ${T.line}` }} />
+            <Bar dataKey="total" radius={[5, 5, 0, 0]}>{weeklyTrend.map((d, i) => <Cell key={i} fill={d.current ? T.blue : T.barIdle} />)}</Bar>
+          </BarChart>
+        )}</Chart>
+        <div style={subhead}>by category (this week)</div>
+        {cats.length === 0 ? <Empty text="nothing logged this week" /> : cats.map((c, i) => {
+          const pct = spent > 0 ? Math.round((c.value / spent) * 100) : 0;
+          return (
+            <div key={i} style={{ marginBottom: 8 }}>
+              <div className="flex items-center justify-between" style={{ fontSize: 13, marginBottom: 4 }}>
+                <span className="flex items-center gap-2"><span style={{ width: 8, height: 8, borderRadius: 9, background: c.color }} />{c.name}</span>
+                <span className="num" style={{ color: T.sub }}>{money(c.value)} · {pct}%</span>
+              </div>
+              <Progress value={c.value} max={spent || 1} color={c.color} />
+            </div>
+          );
+        })}
+        <div style={subhead}>biggest expenses this week</div>
+        {top.length === 0 ? <Empty text="none" /> : top.map((e) => (
+          <div key={e.id} className="flex items-center justify-between" style={rowS}>
+            <span>{e.note || e.category} <span style={{ color: T.faint }}>· {e.category}</span></span>
+            <span className="num" style={{ fontWeight: 600 }}>{money(e.amount)}</span>
+          </div>
+        ))}
+      </Modal>
+    );
+  }
+
+  if (kind === "remaining") {
+    return (
+      <Modal title="budget analytics" onClose={onClose}>
+        {noBudget ? <Empty text="no budget set yet — set one with the ⚙ budget button" /> : (
+          <>
+            <div className="flex gap-2" style={{ marginBottom: 16 }}>
+              <Mini label="weekly budget" value={money(budgets.weekly)} tint={T.ink} />
+              <Mini label="spent" value={money(spent)} tint={T.blue} />
+              <Mini label="remaining" value={money(remaining)} tint={remaining < 0 ? T.rose : T.green} />
+            </div>
+            <div style={{ ...subhead, marginTop: 0 }}>category limits (this week)</div>
+            {byCat.map((c, i) => (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div className="flex items-center justify-between" style={{ fontSize: 13, marginBottom: 4 }}>
+                  <span className="flex items-center gap-2"><span style={{ width: 8, height: 8, borderRadius: 9, background: c.color }} />{c.name}</span>
+                  <span className="num" style={{ color: c.limit && c.value > c.limit ? T.rose : T.sub }}>{money(c.value)}{c.limit ? ` / ${money(c.limit)}` : ""}</span>
+                </div>
+                <Progress value={c.value} max={c.limit || c.value || 1} color={c.color} />
+              </div>
+            ))}
+          </>
+        )}
+      </Modal>
+    );
+  }
+
+  if (kind === "bills") {
+    const bills = projectUpcomingBills(payments, 90);
+    const horizonTotal = bills.reduce((s, b) => s + b.amount, 0);
+    let running = 0;
+    return (
+      <Modal title="upcoming bills" onClose={onClose}>
+        <div className="flex gap-2" style={{ marginBottom: 14 }}>
+          <Mini label="unpaid now" value={money(unpaidTotal)} tint={overdue.length ? T.rose : T.amber} />
+          <Mini label="next 90 days" value={money(horizonTotal)} tint={T.ink} />
+          <Mini label="bills" value={String(bills.length)} tint={T.sub} />
+        </div>
+        {bills.length === 0 ? <Empty text="no upcoming bills — add rent, subscriptions, etc. in “payments due”" /> : bills.map((b) => {
+          running += b.amount;
+          const d = parse(b.date);
+          const days = Math.round((d - today0()) / 86400000);
+          return (
+            <div key={b.id} className="flex items-center justify-between" style={{ ...rowS, padding: "9px 0" }}>
+              <div style={{ minWidth: 0 }}>
+                <div className="flex items-center gap-1" style={{ fontWeight: 600 }}>{b.name}{b.recurring && <Repeat size={11} color={T.faint} />}</div>
+                <div style={{ fontSize: 11.5, color: b.overdue ? T.rose : days <= 7 ? T.amber : T.sub }}>
+                  {b.overdue ? "overdue · " : ""}{d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}{!b.overdue && days >= 0 ? ` · in ${days}d` : ""}
+                </div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div className="num" style={{ fontWeight: 600 }}>{money(b.amount)}</div>
+                <div className="num" style={{ fontSize: 11, color: T.faint }}>Σ {money(running)}</div>
+              </div>
+            </div>
+          );
+        })}
+      </Modal>
+    );
+  }
+
+  // owed
+  const owe = debts.filter((d) => d.direction === "owe").sort((a, b) => b.amount - a.amount);
+  const owed = debts.filter((d) => d.direction === "owed").sort((a, b) => b.amount - a.amount);
+  return (
+    <Modal title="debts & ious" onClose={onClose}>
+      <div className="flex gap-2" style={{ marginBottom: 14 }}>
+        <Mini label="you owe" value={money(iOwe)} tint={T.rose} />
+        <Mini label="owed to you" value={money(owedToMe)} tint={T.green} />
+        <Mini label="net" value={money(owedToMe - iOwe)} tint={owedToMe - iOwe >= 0 ? T.green : T.rose} />
+      </div>
+      <div style={{ ...subhead, marginTop: 4 }}>you owe</div>
+      {owe.length === 0 ? <Empty text="you owe no one" /> : owe.map((d) => (
+        <div key={d.id} className="flex items-center justify-between" style={rowS}>
+          <span>{d.person}{d.note && <span style={{ color: T.faint }}> · {d.note}</span>}</span>
+          <span className="num" style={{ fontWeight: 600, color: T.rose }}>{money(d.amount)}</span>
+        </div>
+      ))}
+      <div style={subhead}>owed to you</div>
+      {owed.length === 0 ? <Empty text="no one owes you" /> : owed.map((d) => (
+        <div key={d.id} className="flex items-center justify-between" style={rowS}>
+          <span>{d.person}{d.note && <span style={{ color: T.faint }}> · {d.note}</span>}</span>
+          <span className="num" style={{ fontWeight: 600, color: T.green }}>{money(d.amount)}</span>
+        </div>
+      ))}
+    </Modal>
   );
 }
 
