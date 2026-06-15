@@ -22,6 +22,7 @@ async function localFetchAll() {
     payments: lget("payments", []),
     debts: lget("debts", []),
     recurring: lget("recurring", []),
+    goals: lget("goals", []),
     budgets: lget("budgets", null),
   };
 }
@@ -46,13 +47,20 @@ const localDb = {
 
   upsertBudget: async (b) => lset("budgets", { weekly: b.weekly, categories: b.categories }),
 
+  addGoal: async (g) => { const item = { id: uid(), name: g.name, target: num(g.target), dueDate: g.dueDate || undefined, note: g.note || "", contributions: [], createdAt: new Date().toISOString() }; lset("goals", [...lget("goals", []), item]); return item; },
+  updateGoal: async (id, patch) => lset("goals", lget("goals", []).map((g) => g.id === id ? { ...g, ...patch } : g)),
+  delGoal: async (id) => lset("goals", lget("goals", []).filter((g) => g.id !== id)),
+  addContribution: async (id, c) => { const item = { id: uid(), amount: num(c.amount), date: c.date }; lset("goals", lget("goals", []).map((g) => g.id === id ? { ...g, contributions: [...(g.contributions || []), item] } : g)); return item; },
+  delContribution: async (goalId, contribId) => lset("goals", lget("goals", []).map((g) => g.id === goalId ? { ...g, contributions: (g.contributions || []).filter((c) => c.id !== contribId) } : g)),
+
   seedSample: async (s) => {
     lset("expenses", s.expenses.map((e) => ({ id: uid(), amount: e.amount, category: e.category, note: e.note || "", date: e.date, recurringId: e.recurringId || undefined })));
     lset("payments", s.payments.map((p) => ({ id: uid(), name: p.name, amount: p.amount, dueDate: p.dueDate, recurring: p.recurring, status: p.status })));
     lset("debts", s.debts.map((d) => ({ id: uid(), person: d.person, amount: d.amount, note: d.note || "", direction: d.direction })));
     lset("recurring", s.recurring.map((r) => ({ id: uid(), amount: r.amount, category: r.category, note: r.note || "", cadence: r.cadence, lastDate: r.lastDate })));
+    if (s.goals) lset("goals", s.goals.map((g) => ({ id: uid(), name: g.name, target: num(g.target), dueDate: g.dueDate || undefined, note: g.note || "", contributions: (g.contributions || []).map((c) => ({ id: uid(), amount: num(c.amount), date: c.date })), createdAt: new Date().toISOString() })));
   },
-  clearAll: async () => { lset("expenses", []); lset("payments", []); lset("debts", []); lset("recurring", []); },
+  clearAll: async () => { lset("expenses", []); lset("payments", []); lset("debts", []); lset("recurring", []); lset("goals", []); },
 };
 
 /* ════════════════════════════════════════════════════════════════
@@ -62,28 +70,32 @@ const mapExpense = (r) => ({ id: r.id, amount: num(r.amount), category: r.catego
 const mapPayment = (r) => ({ id: r.id, name: r.name, amount: num(r.amount), dueDate: r.due_date, recurring: r.recurring, status: r.status });
 const mapDebt = (r) => ({ id: r.id, person: r.person, amount: num(r.amount), note: r.note || "", direction: r.direction });
 const mapRecurring = (r) => ({ id: r.id, amount: num(r.amount), category: r.category, note: r.note || "", cadence: r.cadence, lastDate: r.last_date });
+const mapGoal = (r) => ({ id: r.id, name: r.name, target: num(r.target), dueDate: r.due_date || undefined, note: r.note || "", contributions: r.contributions || [], createdAt: r.created_at });
 
 const expenseRow = (e) => ({ amount: e.amount, category: e.category, note: e.note || "", spent_on: e.date, recurring_id: e.recurringId || null });
 const paymentRow = (p) => ({ name: p.name, amount: p.amount, due_date: p.dueDate, recurring: p.recurring, status: p.status });
 const debtRow = (d) => ({ person: d.person, amount: d.amount, note: d.note || "", direction: d.direction });
 const recurringRow = (r) => ({ amount: r.amount, category: r.category, note: r.note || "", cadence: r.cadence, last_date: r.lastDate });
+const goalRow = (g) => ({ name: g.name, target: g.target, due_date: g.dueDate || null, note: g.note || "", contributions: g.contributions || [] });
 const NIL = "00000000-0000-0000-0000-000000000000";
 
 async function cloudFetchAll() {
-  const [exp, pay, debt, rec, bud] = await Promise.all([
+  const [exp, pay, debt, rec, goal, bud] = await Promise.all([
     supabase.from("expenses").select("*").order("spent_on", { ascending: false }),
     supabase.from("payments").select("*"),
     supabase.from("debts").select("*"),
     supabase.from("recurring_expenses").select("*"),
+    supabase.from("goals").select("*").order("created_at", { ascending: false }),
     supabase.from("budgets").select("*").maybeSingle(),
   ]);
-  const err = exp.error || pay.error || debt.error || rec.error || bud.error;
+  const err = exp.error || pay.error || debt.error || rec.error || goal.error || bud.error;
   if (err) throw err;
   return {
     expenses: (exp.data || []).map(mapExpense),
     payments: (pay.data || []).map(mapPayment),
     debts: (debt.data || []).map(mapDebt),
     recurring: (rec.data || []).map(mapRecurring),
+    goals: (goal.data || []).map(mapGoal),
     budgets: bud.data ? { weekly: num(bud.data.weekly), categories: bud.data.categories } : null,
   };
 }
@@ -105,6 +117,11 @@ const cloudDb = {
   delRecurring: (id) => run(supabase.from("recurring_expenses").delete().eq("id", id)),
   updateRecurringLastDate: (id, lastDate) => run(supabase.from("recurring_expenses").update({ last_date: lastDate }).eq("id", id)),
   upsertBudget: (b, userId) => run(supabase.from("budgets").upsert({ user_id: userId, weekly: b.weekly, categories: b.categories, updated_at: new Date().toISOString() }, { onConflict: "user_id" })),
+  addGoal: (g) => insertOne("goals", goalRow({ ...g, contributions: [] }), mapGoal),
+  updateGoal: (id, patch) => { const row = {}; if ("name" in patch) row.name = patch.name; if ("target" in patch) row.target = patch.target; if ("dueDate" in patch) row.due_date = patch.dueDate || null; if ("note" in patch) row.note = patch.note; if ("contributions" in patch) row.contributions = patch.contributions; return run(supabase.from("goals").update(row).eq("id", id)); },
+  delGoal: (id) => run(supabase.from("goals").delete().eq("id", id)),
+  addContribution: async (id, c) => { const { data, error } = await supabase.from("goals").select("contributions").eq("id", id).single(); if (error) throw error; const item = { id: uid(), amount: num(c.amount), date: c.date }; const next = [...(data.contributions || []), item]; await run(supabase.from("goals").update({ contributions: next }).eq("id", id)); return item; },
+  delContribution: async (goalId, contribId) => { const { data, error } = await supabase.from("goals").select("contributions").eq("id", goalId).single(); if (error) throw error; const next = (data.contributions || []).filter((c) => c.id !== contribId); return run(supabase.from("goals").update({ contributions: next }).eq("id", goalId)); },
   seedSample: (s) => Promise.all([
     supabase.from("expenses").insert(s.expenses.map(expenseRow)),
     supabase.from("payments").insert(s.payments.map(paymentRow)),

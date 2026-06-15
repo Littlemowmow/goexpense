@@ -19,6 +19,7 @@ Built with React + Vite. Charts by Recharts.
 - **Recurring expenses** — mark something weekly/monthly and it auto-logs itself
 - **Payments due** — rent/subscriptions/one-offs, with overdue + due-soon flags; mark paid and recurring bills roll to the next cycle
 - **Debts & IOUs** — who you owe and who owes you, with a running net
+- **Saving for** — plan ahead for future expenses (e.g. a $200 fall-semester camp): set a target and an optional "save up by" date, then chip away with one-tap +$10/+$25/+$50 contributions. Each goal shows a progress bar, a "save $X/wk to stay on pace" nudge, and a celebratory state when you hit it
 - **Edit anything** — every logged expense, payment, and IOU has an inline ✎ edit button (and delete), so you can fix a mistake without re-entering it
 - **Trends** — spending over the last 8 weeks or 6 months vs. your budget
 - **Tap-through analytics** — press any summary card at the top to open a detail view: spending breakdown by category, budget usage, debts, or upcoming bills

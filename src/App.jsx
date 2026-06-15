@@ -7,6 +7,7 @@ import {
   Wallet, CalendarClock, Users, Plus, Trash2, Check, Settings,
   ChevronLeft, ChevronRight, AlertTriangle, ArrowDownRight, ArrowUpRight, X,
   Repeat, Download, Search, TrendingUp, Sparkles, LogOut, Maximize2, Pencil,
+  PiggyBank, Target, CalendarDays,
 } from "lucide-react";
 import { exportPDF } from "./report";
 import { supabase, supabaseConfigured } from "./supabase";
@@ -99,6 +100,12 @@ function buildSample() {
       { person: "Mike", amount: 25, note: "dinner", direction: "owe" },
     ],
     recurring: [{ amount: 11.99, category: "Subscriptions", note: "Spotify", cadence: "monthly", lastDate: fmt(today) }],
+    goals: [
+      { name: "Fall semester camp", target: 200, dueDate: fmt(addDays(today, 75)), note: "deposit due before term",
+        contributions: [{ amount: 50, date: fmt(addDays(today, -20)) }, { amount: 70, date: fmt(addDays(today, -6)) }] },
+      { name: "New laptop", target: 900, dueDate: fmt(addDays(today, 160)), note: "",
+        contributions: [{ amount: 120, date: fmt(addDays(today, -30)) }] },
+    ],
   };
 }
 
@@ -176,7 +183,17 @@ function Segmented({ options, value, onChange }) {
   );
 }
 
-const GlobalStyle = () => <style>{`*{box-sizing:border-box} input::placeholder{color:${T.faint}} .num{font-feature-settings:"tnum";font-variant-numeric:tabular-nums} .serif{font-family:${SERIF}} .card{transition:transform .18s ease, border-color .18s ease} .card:hover{transform:translateY(-2px); border-color:#CCD9DA} .ico-btn:hover{color:${T.ink}!important}`}</style>;
+const GlobalStyle = () => <style>{`*{box-sizing:border-box} input::placeholder{color:${T.faint}} .num{font-feature-settings:"tnum";font-variant-numeric:tabular-nums} .serif{font-family:${SERIF}} .card{transition:transform .18s ease, border-color .18s ease} .card:hover{transform:translateY(-2px); border-color:#CCD9DA} .ico-btn:hover{color:${T.ink}!important}
+  .goalcard{transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease}
+  .goalcard:hover{transform:translateY(-2px); box-shadow:0 14px 32px -20px rgba(56,69,74,.38)}
+  .gchip{transition:background .15s ease, color .15s ease, border-color .15s ease}
+  .gchip:hover{background:${T.green}1f; border-color:${T.green}; color:${T.green}!important}
+  .gbtn{transition:transform .12s ease, filter .12s ease}
+  .gbtn:hover{filter:brightness(1.04)} .gbtn:active{transform:scale(.93)}
+  .goalbar{transition:width .6s cubic-bezier(.22,1,.36,1)}
+  @keyframes fundedpop{0%{transform:scale(.5);opacity:0}55%{transform:scale(1.18)}100%{transform:scale(1);opacity:1}}
+  .fundedpop{animation:fundedpop .42s ease both}
+  @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}`}</style>;
 
 function Splash({ text = "settling in…" }) {
   return <div style={{ background: BG, color: T.sub, minHeight: "100vh", display: "grid", placeItems: "center", fontFamily: SERIF, fontStyle: "italic", fontSize: 16, padding: 20, textAlign: "center" }}>{text}</div>;
@@ -251,6 +268,7 @@ export default function GOexpense() {
   const [payments, setPayments] = useState([]);
   const [debts, setDebts] = useState([]);
   const [recurring, setRecurring] = useState([]);
+  const [goals, setGoals] = useState([]);
   const [weekRef, setWeekRef] = useState(() => weekStart(new Date()));
   const [showSettings, setShowSettings] = useState(false);
   const [query, setQuery] = useState("");
@@ -260,6 +278,7 @@ export default function GOexpense() {
   const [editingExpense, setEditingExpense] = useState(null);
   const [editingPayment, setEditingPayment] = useState(null);
   const [editingDebt, setEditingDebt] = useState(null);
+  const [editingGoal, setEditingGoal] = useState(null);
 
   /* auth: current session + subscribe to changes */
   useEffect(() => {
@@ -293,7 +312,7 @@ export default function GOexpense() {
           }
         }
         if (cancelled) return;
-        setExpenses(d.expenses); setPayments(d.payments); setDebts(d.debts); setRecurring(d.recurring); setBudgets(nextBudgets);
+        setExpenses(d.expenses); setPayments(d.payments); setDebts(d.debts); setRecurring(d.recurring); setGoals(d.goals || []); setBudgets(nextBudgets);
       } catch (err) {
         if (!cancelled) setDataError(err.message || String(err));
       } finally {
@@ -471,22 +490,52 @@ export default function GOexpense() {
   };
   const saveBudget = async (b) => { const prev = budgets; setBudgets(b); setShowSettings(false); try { await db.upsertBudget(b, userId); } catch (err) { setBudgets(prev); fail("save budget")(err); } };
   const loadSample = async () => {
-    try { await db.seedSample(buildSample()); const d = await fetchAll(); setExpenses(d.expenses); setPayments(d.payments); setDebts(d.debts); setRecurring(d.recurring); if (d.budgets) setBudgets(d.budgets); }
+    try { await db.seedSample(buildSample()); const d = await fetchAll(); setExpenses(d.expenses); setPayments(d.payments); setDebts(d.debts); setRecurring(d.recurring); setGoals(d.goals || []); if (d.budgets) setBudgets(d.budgets); }
     catch (err) { fail("load sample data")(err); }
   };
   const clearAll = async () => {
-    setExpenses([]); setPayments([]); setDebts([]); setRecurring([]);
+    setExpenses([]); setPayments([]); setDebts([]); setRecurring([]); setGoals([]);
     try { await db.clearAll(); }
     catch (err) {
       fail("clear data")(err);
       // some tables may have cleared; reconcile UI with actual DB state
-      try { const d = await fetchAll(); setExpenses(d.expenses); setPayments(d.payments); setDebts(d.debts); setRecurring(d.recurring); } catch { /* leave cleared */ }
+      try { const d = await fetchAll(); setExpenses(d.expenses); setPayments(d.payments); setDebts(d.debts); setRecurring(d.recurring); setGoals(d.goals || []); } catch { /* leave cleared */ }
     }
   };
   const signOut = async () => {
     await supabase.auth.signOut();
-    setExpenses([]); setPayments([]); setDebts([]); setRecurring([]); setBudgets(DEFAULTS.budgets); setShowSettings(false);
+    setExpenses([]); setPayments([]); setDebts([]); setRecurring([]); setGoals([]); setBudgets(DEFAULTS.budgets); setShowSettings(false);
   };
+
+  /* ---- goals ("saving for") ---- */
+  const addGoal = async (g) => { try { const row = await db.addGoal(g); setGoals((x) => [row, ...x]); } catch (err) { fail("add goal")(err); } };
+  const removeGoal = async (id) => {
+    const item = goals.find((g) => g.id === id);
+    setGoals((x) => x.filter((g) => g.id !== id));
+    try { await db.delGoal(id); } catch (err) { if (item) setGoals((x) => [item, ...x]); fail("delete goal")(err); }
+  };
+  const editGoal = async (id, patch) => {
+    const prev = goals;
+    setGoals((x) => x.map((g) => g.id === id ? { ...g, ...patch } : g));
+    setEditingGoal(null);
+    try { await db.updateGoal(id, patch); } catch (err) { setGoals(prev); fail("edit goal")(err); }
+  };
+  const addMoney = async (id, amount) => {
+    const prev = goals;
+    try {
+      const item = await db.addContribution(id, { amount, date: fmt(new Date()) });
+      setGoals((x) => x.map((g) => g.id === id ? { ...g, contributions: [...(g.contributions || []), item] } : g));
+    } catch (err) { setGoals(prev); fail("add money")(err); }
+  };
+  const removeContribution = async (goalId, contribId) => {
+    const prev = goals;
+    setGoals((x) => x.map((g) => g.id === goalId ? { ...g, contributions: (g.contributions || []).filter((c) => c.id !== contribId) } : g));
+    try { await db.delContribution(goalId, contribId); } catch (err) { setGoals(prev); fail("undo contribution")(err); }
+  };
+
+  /* goals totals */
+  const goalsSaved = goals.reduce((s, g) => s + (g.contributions || []).reduce((a, c) => a + Number(c.amount || 0), 0), 0);
+  const goalsTarget = goals.reduce((s, g) => s + Number(g.target || 0), 0);
 
   /* greeting */
   const hour = new Date().getHours();
@@ -731,6 +780,33 @@ export default function GOexpense() {
             ))}
           </div>
         </Card>
+
+        {/* ---- saving for (goals) ---- */}
+        <Card className="p-5" style={{ gridColumn: "1 / -1" }}>
+          <SectionTitle icon={<PiggyBank size={16} />} title="saving for" />
+          <div className="flex gap-2" style={{ marginBottom: 4 }}>
+            <Mini label="saved so far" value={money(goalsSaved)} tint={T.green} />
+            <Mini label="of total goals" value={money(goalsTarget)} tint={T.blue} />
+            <Mini label="left to save" value={money(Math.max(0, goalsTarget - goalsSaved))} tint={T.amber} />
+          </div>
+          <GoalAdder onAdd={addGoal} />
+          <div style={{ marginTop: 14, display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))" }}>
+            {goals.length === 0 && (
+              <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: "22px 12px" }}>
+                <div style={{ display: "grid", placeItems: "center", width: 46, height: 46, borderRadius: 14, background: T.green + "1f", margin: "0 auto 10px" }}><PiggyBank size={22} color={T.green} /></div>
+                <div className="serif" style={{ fontSize: 16, color: T.ink, marginBottom: 3 }}>plan ahead for what's coming</div>
+                <div className="serif" style={{ color: T.faint, fontSize: 13.5, fontStyle: "italic" }}>add something to save up for — like a $200 fall-semester camp — and chip away at it</div>
+              </div>
+            )}
+            {goals.map((g) => (
+              <GoalRow key={g.id} goal={g}
+                onAddMoney={(amt) => addMoney(g.id, amt)}
+                onEdit={() => setEditingGoal(g)}
+                onDelete={() => removeGoal(g.id)}
+                onDelContribution={(cid) => removeContribution(g.id, cid)} />
+            ))}
+          </div>
+        </Card>
       </div>
       </div>
 
@@ -740,6 +816,8 @@ export default function GOexpense() {
         onSave={(patch) => editPayment(editingPayment.id, patch)} onClose={() => setEditingPayment(null)} />}
       {editingDebt && <EditDebtModal debt={editingDebt}
         onSave={(patch) => editDebt(editingDebt.id, patch)} onClose={() => setEditingDebt(null)} />}
+      {editingGoal && <EditGoalModal goal={editingGoal}
+        onSave={(patch) => editGoal(editingGoal.id, patch)} onClose={() => setEditingGoal(null)} />}
 
       {analytics && <AnalyticsModal kind={analytics} onClose={() => setAnalytics(null)}
         ctx={{ spent, remaining, budgets, noBudget, wkExpenses, byCat, weeklyTrend, payments, debts, iOwe, owedToMe, unpaidTotal, overdue }} />}
@@ -864,6 +942,154 @@ function DebtAdder({ onAdd }) {
       <input style={{ ...inputStyle, gridColumn: "1 / -1" }} placeholder="for what? (optional)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
       <button style={{ ...btn(T.violet), gridColumn: "1 / -1", justifyContent: "center" }} onClick={add}><Plus size={15} /> add iou</button>
     </div>
+  );
+}
+
+/* ---- goals: derive progress + pace from the contribution log ---- */
+function goalStats(g) {
+  const saved = (g.contributions || []).reduce((s, c) => s + Number(c.amount || 0), 0);
+  const target = Number(g.target || 0);
+  const remaining = Math.max(0, target - saved);
+  const pct = target > 0 ? Math.min(100, (saved / target) * 100) : 0;
+  const funded = target > 0 && saved >= target;
+  const extra = saved - target;
+  let daysLeft = null, perWeek = 0, due = false;
+  if (g.dueDate) {
+    daysLeft = Math.ceil((parse(g.dueDate) - today0()) / 86400000);
+    due = daysLeft < 0 && remaining > 0;            // past the date, still short → reminder
+    const weeksLeft = Math.max(1, Math.ceil(daysLeft / 7));
+    perWeek = !funded && daysLeft > 0 ? remaining / weeksLeft : 0;
+  }
+  return { saved, target, remaining, pct, funded, extra, daysLeft, perWeek, due };
+}
+
+function GoalAdder({ onAdd }) {
+  const [name, setName] = useState("");
+  const [target, setTarget] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [note, setNote] = useState("");
+  const add = () => {
+    const t = parseFloat(target);
+    if (!name.trim() || !t || t <= 0) return;
+    onAdd({ name: name.trim(), target: t, dueDate: dueDate || undefined, note: note.trim() });
+    setName(""); setTarget(""); setDueDate(""); setNote("");
+  };
+  return (
+    <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 10 }}>
+      <input style={{ ...inputStyle, gridColumn: "1 / -1" }} placeholder="what are you saving for? (e.g. fall camp)" value={name} onChange={(e) => setName(e.target.value)} />
+      <input style={inputStyle} type="number" placeholder="target amount" value={target} onChange={(e) => setTarget(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
+      <input style={inputStyle} type="date" title="save up by (optional)" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+      <input style={{ ...inputStyle, gridColumn: "1 / -1" }} placeholder="note (optional)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
+      <button style={{ ...btn(T.green, "#23311F"), gridColumn: "1 / -1", justifyContent: "center" }} onClick={add}><Target size={15} /> add goal</button>
+    </div>
+  );
+}
+
+const gchipStyle = { background: "#FFFFFF", border: `1px solid ${T.line}`, color: T.sub, borderRadius: 99, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", lineHeight: 1 };
+
+function GoalRow({ goal, onAddMoney, onEdit, onDelete, onDelContribution }) {
+  const [amt, setAmt] = useState("");
+  const [showLog, setShowLog] = useState(false);
+  const s = goalStats(goal);
+  const logs = [...(goal.contributions || [])].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const add = () => { const a = parseFloat(amt); if (!a || a <= 0) return; onAddMoney(a); setAmt(""); };
+  const status = s.funded
+    ? { text: s.extra > 0 ? `you made it — ${money(s.extra)} over` : "you made it 🎉", color: T.green, icon: <Check size={12} /> }
+    : s.due
+    ? { text: `${money(s.remaining)} short — your date has passed`, color: T.rose, icon: <AlertTriangle size={12} /> }
+    : goal.dueDate && s.perWeek > 0
+    ? { text: `save ${money(s.perWeek)}/wk to stay on pace`, color: T.amber, icon: <CalendarClock size={12} /> }
+    : { text: `${money(s.remaining)} to go`, color: T.sub, icon: <Target size={12} /> };
+  const iconBtn = { background: "transparent", border: "none", color: T.faint, cursor: "pointer", padding: 4 };
+  const accent = s.funded ? T.green : s.due ? T.rose : T.line;
+  return (
+    <div className="goalcard" style={{ border: `1px solid ${s.funded ? T.green + "66" : s.due ? T.rose + "66" : T.line}`, background: T.panel2, borderRadius: 18, padding: 15, position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", inset: "0 auto 0 0", width: 3, background: accent, opacity: s.funded || s.due ? 1 : 0 }} />
+      <div className="flex items-center justify-between gap-2" style={{ marginBottom: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="serif flex items-center gap-2" style={{ fontSize: 16, fontWeight: 500 }}>
+            <span style={{ display: "grid", placeItems: "center", width: 24, height: 24, borderRadius: 8, background: T.green + "22", flexShrink: 0 }}><Target size={13} color={T.green} /></span>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{goal.name}</span>
+          </div>
+          {(goal.dueDate || goal.note) && (
+            <div style={{ fontSize: 11.5, color: T.sub, marginTop: 5, marginLeft: 32 }}>
+              {goal.dueDate && <span><CalendarDays size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />by {parse(goal.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })}{s.daysLeft != null && s.daysLeft >= 0 && !s.funded ? ` · ${s.daysLeft} days left` : ""}</span>}
+              {goal.dueDate && goal.note && " · "}
+              {goal.note}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1" style={{ flexShrink: 0 }}>
+          <button onClick={onEdit} title="edit" style={iconBtn} className="ico-btn"><Pencil size={13} /></button>
+          <button onClick={onDelete} title="remove" style={iconBtn} className="ico-btn"><Trash2 size={14} /></button>
+        </div>
+      </div>
+
+      <div className="flex items-baseline justify-between" style={{ marginBottom: 7 }}>
+        <span className="num" style={{ fontWeight: 700, fontSize: 19, color: T.ink }}>{money(s.saved)}<span style={{ color: T.sub, fontWeight: 400, fontSize: 13.5 }}> / {money(s.target)}</span></span>
+        <span className="num fundedpop" style={{ fontSize: 13, fontWeight: 700, color: s.funded ? T.green : T.sub }} key={s.funded}>{Math.round(s.pct)}%</span>
+      </div>
+      <div style={{ height: 10, background: T.track, borderRadius: 99, overflow: "hidden" }}>
+        <div className="goalbar" style={{ width: `${s.pct}%`, height: "100%", borderRadius: 99, background: s.funded ? `linear-gradient(90deg, ${T.green}, #7FB89A)` : `linear-gradient(90deg, ${T.blue}, ${T.green})` }} />
+      </div>
+      <div className="flex items-center gap-1" style={{ fontSize: 12, color: status.color, marginTop: 8, fontWeight: 600 }}>{status.icon}{status.text}</div>
+
+      {!s.funded && (
+        <div className="flex items-center gap-1.5" style={{ marginTop: 12, flexWrap: "wrap" }}>
+          {[10, 25, 50].map((v) => (
+            <button key={v} className="gchip gbtn" style={gchipStyle} onClick={() => onAddMoney(v)} title={`add $${v} to this goal`}>+${v}</button>
+          ))}
+          <div className="flex gap-1.5" style={{ flex: 1, minWidth: 130 }}>
+            <input style={{ ...inputStyle, padding: "7px 10px", fontSize: 13 }} type="number" inputMode="decimal" placeholder="other" value={amt} onChange={(e) => setAmt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
+            <button className="gbtn" style={{ ...btn(T.green, "#1F2E1B"), padding: "7px 11px" }} onClick={add} title="add to this goal"><Plus size={15} /></button>
+          </div>
+        </div>
+      )}
+      {s.funded && (
+        <button className="gbtn" style={{ ...ghost, width: "100%", justifyContent: "center", marginTop: 12, borderColor: T.green + "55", color: T.green }} onClick={onEdit}>raise the goal →</button>
+      )}
+
+      {logs.length > 0 && (
+        <button onClick={() => setShowLog((v) => !v)} style={{ background: "transparent", border: "none", color: T.faint, cursor: "pointer", fontSize: 11.5, marginTop: 10, padding: 0, fontWeight: 500 }}>
+          {showLog ? "▾ hide" : "▸ show"} {logs.length} contribution{logs.length > 1 ? "s" : ""}
+        </button>
+      )}
+      {showLog && (
+        <div style={{ marginTop: 6 }}>
+          {logs.map((c) => (
+            <div key={c.id} className="flex items-center justify-between" style={{ fontSize: 12, color: T.sub, padding: "6px 2px", borderTop: `1px solid ${T.line}` }}>
+              <span>{c.date ? parse(c.date).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""}</span>
+              <span className="flex items-center gap-2"><span className="num" style={{ color: T.ink, fontWeight: 600 }}>+{money(Number(c.amount || 0))}</span>
+                <button onClick={() => onDelContribution(c.id)} title="undo this contribution" style={{ background: "transparent", border: "none", color: T.faint, cursor: "pointer", padding: 2 }} className="ico-btn"><Trash2 size={12} /></button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EditGoalModal({ goal, onSave, onClose }) {
+  const [name, setName] = useState(goal.name);
+  const [target, setTarget] = useState(String(goal.target));
+  const [dueDate, setDueDate] = useState(goal.dueDate || "");
+  const [note, setNote] = useState(goal.note || "");
+  const save = () => {
+    const t = parseFloat(target);
+    if (!name.trim() || !t || t <= 0) return;
+    onSave({ name: name.trim(), target: t, dueDate: dueDate || undefined, note: note.trim() });
+  };
+  return (
+    <Modal title="edit goal" onClose={onClose}>
+      <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <input style={{ ...inputStyle, gridColumn: "1 / -1" }} placeholder="name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <input style={inputStyle} type="number" placeholder="target amount" value={target} onChange={(e) => setTarget(e.target.value)} />
+        <input style={inputStyle} type="date" title="save up by (optional)" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        <input style={{ ...inputStyle, gridColumn: "1 / -1" }} placeholder="note (optional)" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
+        <button style={{ ...btn(T.green, "#23311F"), gridColumn: "1 / -1", justifyContent: "center" }} onClick={save}><Check size={15} /> save changes</button>
+      </div>
+    </Modal>
   );
 }
 
